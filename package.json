@@ -1,0 +1,15 @@
+{
+  "name": "work-tracker",
+  "version": "1.0.0",
+  "description": "Ask every 15 minutes what I'm currently working on (Electron)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-packager . WorkTracker --platform=win32,linux,darwin --arch=x64 --out=dist --overwrite"
+  },
+  "author": "you",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^26.6.10"
+  }
+}

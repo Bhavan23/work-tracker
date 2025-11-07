@@ -1,0 +1,58 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Work Tracker</title>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'">
+    <style>
+      body { font-family: system-ui, -apple-system,Segoe UI, Roboto, Arial; margin: 0; padding: 16px; background: #f5f7fb; color: #111; }
+      header { display:flex; align-items:center; justify-content:space-between; margin-bottom: 12px; }
+      h1 { margin:0; font-size:18px; }
+      .controls { display:flex; gap:8px; align-items:center;}
+      input[type="number"] { width:72px; padding:6px; }
+      #entries { margin-top:12px; max-height:380px; overflow:auto; background:white; border-radius:8px; padding:12px; box-shadow: 0 2px 6px rgba(0,0,0,0.06);}
+      .entry { padding:8px; border-bottom:1px solid #eee; }
+      .entry:last-child { border-bottom:none; }
+      .ts { color:#666; font-size:12px; }
+      /* modal */
+      .modal { position: fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,0.46); }
+      .modal.open { display:flex; }
+      .card { background:white; width:480px; padding:16px; border-radius:8px; box-shadow:0 12px 24px rgba(0,0,0,0.2); }
+      textarea { width:100%; height:110px; padding:8px; font-size:14px; }
+      .row { display:flex; gap:8px; justify-content:flex-end; margin-top:8px; }
+      button { padding:8px 12px; border-radius:6px; border: none; cursor:pointer; }
+      button.primary { background:#0b74de; color:white; }
+      button.ghost { background:#f3f4f6; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Work Tracker</h1>
+      <div class="controls">
+        <label>Ask every
+          <input id="interval-min" type="number" min="1" value="15" /> minutes
+        </label>
+        <button id="save-interval" class="ghost">Save</button>
+      </div>
+    </header>
+
+    <section>
+      <strong>Recent entries</strong>
+      <div id="entries"></div>
+    </section>
+
+    <!-- modal prompt -->
+    <div id="prompt-modal" class="modal">
+      <div class="card">
+        <h3>What are you currently working on?</h3>
+        <textarea id="prompt-text" placeholder="Type what you're doing..."></textarea>
+        <div class="row">
+          <button id="dismiss" class="ghost">Dismiss</button>
+          <button id="save-entry" class="primary">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="./renderer.js"></script>
+  </body>
+</html>
