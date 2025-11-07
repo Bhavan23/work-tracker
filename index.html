@@ -6,7 +6,7 @@
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'">
     <style>
       body { font-family: system-ui, -apple-system,Segoe UI, Roboto, Arial; margin: 0; padding: 16px; background: #f5f7fb; color: #111; }
-      header { display:flex; align-items:center; justify-content:space-between; margin-bottom: 12px; }
+      header { display:flex; align-items:center; justify-content:space-between; margin-bottom: 12px; gap: 12px; flex-wrap:wrap; }
       h1 { margin:0; font-size:18px; }
       .controls { display:flex; gap:8px; align-items:center;}
       input[type="number"] { width:72px; padding:6px; }
@@ -23,16 +23,31 @@
       button { padding:8px 12px; border-radius:6px; border: none; cursor:pointer; }
       button.primary { background:#0b74de; color:white; }
       button.ghost { background:#f3f4f6; }
+      .status { font-size:12px; color:#444; display:flex; align-items:center; gap:8px; }
+      .backup-area { display:flex; gap:8px; align-items:center; }
     </style>
   </head>
   <body>
     <header>
-      <h1>Work Tracker</h1>
+      <div style="display:flex; align-items:center; gap:12px;">
+        <h1>Work Tracker</h1>
+        <div class="status">
+          <span id="last-backup">No backups yet</span>
+          <div style="font-size:12px;color:#666;margin-left:12px;">
+            <small>Backup location: <span id="backup-location">—</span></small>
+          </div>
+        </div>
+      </div>
+
       <div class="controls">
         <label>Ask every
           <input id="interval-min" type="number" min="1" value="15" /> minutes
         </label>
         <button id="save-interval" class="ghost">Save</button>
+
+        <div class="backup-area">
+          <button id="backup-now" class="ghost">Backup Now</button>
+        </div>
       </div>
     </header>
 

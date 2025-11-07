@@ -6,11 +6,21 @@ const dismissBtn = document.getElementById("dismiss");
 const intervalMinInput = document.getElementById("interval-min");
 const saveIntervalBtn = document.getElementById("save-interval");
 
+const backupBtn = document.getElementById("backup-now");
+const lastBackupEl = document.getElementById("last-backup");
+const backupLocationEl = document.getElementById("backup-location");
+
 async function loadEntries() {
   const entries = await window.electronAPI.readEntries();
+  renderEntries(entries);
+  await showBackupLocation();
+}
+
+function renderEntries(entries) {
   entriesEl.innerHTML = "";
   if (!entries || entries.length === 0) {
     entriesEl.innerHTML = "<div style='padding:14px;color:#666'>No entries yet</div>";
+    lastBackupEl.textContent = "No entries yet";
     return;
   }
   for (const e of entries) {
@@ -20,10 +30,13 @@ async function loadEntries() {
     d.innerHTML = `<div>${escapeHtml(e.text)}</div><div class="ts">${ts}</div>`;
     entriesEl.appendChild(d);
   }
+  lastBackupEl.textContent = `Last entry: ${new Date(entries[0].ts).toLocaleString()}`;
 }
 
 function escapeHtml(str = "") {
-  return str.replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
+  return str.replace(/[&<>"']/g, (m) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m])
+  );
 }
 
 function openPrompt() {
@@ -38,14 +51,10 @@ function closePrompt() {
 
 saveBtn.addEventListener("click", async () => {
   const text = promptText.value.trim();
-  if (!text) {
-    // allow empty? we ignore
-    closePrompt();
-    return;
-  }
+  closePrompt();
+  if (!text) return;
   await window.electronAPI.saveEntry(text);
   await loadEntries();
-  closePrompt();
 });
 
 dismissBtn.addEventListener("click", () => {
@@ -58,10 +67,38 @@ saveIntervalBtn.addEventListener("click", async () => {
   alert(`Interval set to ${mins} minute(s)`);
 });
 
-// Listen for main process asking to open prompt
 window.electronAPI.onOpenPrompt(() => {
   openPrompt();
 });
+
+if (backupBtn) {
+  backupBtn.addEventListener("click", async () => {
+    backupBtn.disabled = true;
+    backupBtn.textContent = "Backing up…";
+    try {
+      await window.electronAPI.createBackup();
+      await loadEntries();
+      lastBackupEl.textContent = `Backup created: ${new Date().toLocaleString()}`;
+      await showBackupLocation();
+    } catch (e) {
+      console.error("Backup failed:", e);
+      alert("Backup failed. Check console.");
+    } finally {
+      backupBtn.disabled = false;
+      backupBtn.textContent = "Backup Now";
+    }
+  });
+}
+
+async function showBackupLocation() {
+  try {
+    const p = await window.electronAPI.getBackupPath();
+    if (backupLocationEl) backupLocationEl.textContent = p || "—";
+  } catch (e) {
+    console.error("Failed to get backup path:", e);
+    if (backupLocationEl) backupLocationEl.textContent = "Unknown";
+  }
+}
 
 // initial load
 loadEntries();
