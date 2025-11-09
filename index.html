@@ -4,7 +4,6 @@
   <meta charset="utf-8" />
   <title>Work Tracker — Tabs UI</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'">
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
@@ -28,7 +27,6 @@
     </header>
 
     <main class="container">
-      <!-- Dashboard Tab -->
       <section id="panel-dashboard" class="panel" role="tabpanel">
         <div class="panel-grid">
           <div class="card">
@@ -54,7 +52,6 @@
         </div>
       </section>
 
-      <!-- Entries Tab -->
       <section id="panel-entries" class="panel hidden" role="tabpanel" aria-hidden="true">
         <div class="subhead">
           <h3>Entries</h3>
@@ -63,7 +60,6 @@
         <div id="entries" class="entries full"></div>
       </section>
 
-      <!-- Settings Tab -->
       <section id="panel-settings" class="panel hidden" role="tabpanel" aria-hidden="true">
         <h3>Settings</h3>
         <div class="settings-grid">
@@ -94,7 +90,6 @@
         </div>
       </section>
 
-      <!-- Backup Tab -->
       <section id="panel-backup" class="panel hidden" role="tabpanel" aria-hidden="true">
         <h3>Backup</h3>
         <div class="card">
@@ -113,24 +108,15 @@
             </div>
             <div class="backup-actions">
               <button id="backup-now" class="primary">Backup Now</button>
-              <button id="open-backup-dir" class="ghost">Open Folder</button>
+              <button id="open-backup-folder" class="ghost">Open Folder</button>
             </div>
           </div>
-          <p class="muted" style="margin-top:10px">Backups are stored in app directory by default and one file builds per day (overwrites that day).</p>
-        </div>
-
-        <div class="card" style="margin-top:12px">
-          <h4>Manual restore</h4>
-          <p class="muted">Select a backup file from the folder to inspect or restore (feature: open folder only).</p>
-          <div class="row">
-            <button id="open-backup-folder" class="ghost">Open backup folder</button>
-          </div>
+          <p class="muted" style="margin-top:10px">Backups are stored in app directory by default and only one file per day is created/updated.</p>
         </div>
       </section>
     </main>
   </div>
 
-  <!-- Prompt modal -->
   <div id="prompt-modal" class="modal" aria-hidden="true">
     <div class="modal-card">
       <strong>What are you currently working on?</strong>
@@ -145,7 +131,6 @@
   </div>
 
   <div id="toast-root"></div>
-
   <script src="./renderer.js"></script>
 </body>
 </html>

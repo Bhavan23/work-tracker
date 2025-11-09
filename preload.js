@@ -1,4 +1,4 @@
-// preload.js
+// preload.js - exposes safe API to renderer
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("electronAPI", {
@@ -6,10 +6,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
   saveEntry: (text) => ipcRenderer.invoke("save-entry", text),
   createBackup: () => ipcRenderer.invoke("create-backup"),
   getBackupPath: () => ipcRenderer.invoke("get-backup-path"),
+  openBackupFolder: () => ipcRenderer.invoke("open-backup-folder"),
   getConfig: () => ipcRenderer.invoke("get-config"),
-  setConfig: (obj) => ipcRenderer.invoke("set-config", obj),
+  setConfig: (partial) => ipcRenderer.invoke("set-config", partial),
   skipNext: () => ipcRenderer.invoke("skip-next"),
-  setIntervalMinutes: (m) => ipcRenderer.invoke("set-interval-minutes", m),
-  getUserdataPath: () => ipcRenderer.invoke("get-userdata-path"),
+  getUserDataPath: () => ipcRenderer.invoke("get-userdata-path"),
+  // allow main to tell renderer to open prompt
   onOpenPrompt: (cb) => ipcRenderer.on("open-prompt", cb),
 });
