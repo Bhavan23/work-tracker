@@ -1,117 +1,121 @@
+// main.js - Work Tracker (with system notification on settings change + scheduled confirmation)
 const { app, BrowserWindow, Notification, ipcMain } = require("electron");
 const path = require("path");
 const fs = require("fs");
 
-// ----------------- Config / paths -----------------
-const DATA_FILE = path.join(app.getPath("userData"), "data.json");
+// ----------------- Paths -----------------
+const USERDATA = app.getPath("userData");
+const DATA_FILE = path.join(USERDATA, "data.json");
+const CONFIG_FILE = path.join(USERDATA, "config.json");
 const APP_BACKUP_DIR = path.join(__dirname, "backups");
-const USERDATA_BACKUP_DIR = path.join(app.getPath("userData"), "backups");
+const USERDATA_BACKUP_DIR = path.join(USERDATA, "backups");
 let BACKUP_DIR = APP_BACKUP_DIR;
+const LOG_FILE = path.join(USERDATA, "work-tracker.log");
 
-// timer config
-let askIntervalMs = 15 * 60 * 1000; // default 15 minutes
-let timer = null;
+// ----------------- Runtime -----------------
 let mainWindow = null;
+let timer = null;
+let unsavedCounter = 0;
+let scheduledSettingConfirmation = null; // timeout id for scheduled confirmation notification
 
-// ----------------- Notification enable/disable logic -----------------
-// Allow forcing disable via env var for headless / CI / WSL
-const ENV_DISABLE_NOTIFS = !!process.env.WORK_TRACKER_DISABLE_NOTIFICATIONS;
-
-// Heuristics: on linux, if DISPLAY or XDG_RUNTIME_DIR are missing, notifications likely won't work.
-// Also disable on WSL (detect via /proc/version containing Microsoft)
-function isRunningOnWSL() {
+// ----------------- Logging -----------------
+function appendLog(level, ...args) {
   try {
-    const ver = fs.readFileSync("/proc/version", "utf8").toLowerCase();
-    return ver.includes("microsoft") || ver.includes("wsl");
-  } catch {
-    return false;
-  }
+    const ts = new Date().toISOString();
+    const line = `${ts} [${level}] ${args.map(a => (typeof a === "string" ? a : JSON.stringify(a))).join(" ")}\n`;
+    fs.appendFileSync(LOG_FILE, line, "utf8");
+  } catch {}
 }
+["log", "info", "warn", "error"].forEach(m => {
+  const orig = console[m];
+  console[m] = (...a) => { try { orig(...a); } catch {} appendLog(m.toUpperCase(), ...a); };
+});
+console.info("Work Tracker userData:", USERDATA);
 
-function notificationsLikelyAvailable() {
-  if (ENV_DISABLE_NOTIFS) return false;
-  if (process.platform !== "linux") return true; // mac/win usually ok
-  // linux heuristics
-  if (!process.env.DISPLAY && !process.env.XDG_RUNTIME_DIR) return false;
-  if (isRunningOnWSL()) return false;
-  return true;
-}
-
-const NOTIFICATIONS_ENABLED = notificationsLikelyAvailable();
-
-// ----------------- Helpers -----------------
-function writeJsonAtomic(filePath, obj) {
+// ----------------- File Helpers -----------------
+function writeJsonAtomic(filePath, data) {
   const tmp = filePath + ".tmp";
-  const data = JSON.stringify(obj, null, 2);
-  const fd = fs.openSync(tmp, "w");
-  try {
-    fs.writeSync(fd, data, null, "utf8");
-    fs.fsyncSync(fd);
-  } finally {
-    fs.closeSync(fd);
-  }
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
   fs.renameSync(tmp, filePath);
 }
-
-function readJson(filePath) {
+function readJsonSafe(filePath, fallback = null) {
   try {
-    if (!fs.existsSync(filePath)) return [];
+    if (!fs.existsSync(filePath)) return fallback;
     const raw = fs.readFileSync(filePath, "utf8");
-    return JSON.parse(raw || "[]");
-  } catch (err) {
-    console.error("readJson error:", err);
-    return [];
+    return JSON.parse(raw || "null");
+  } catch {
+    return fallback;
   }
 }
 
-function ensureDataFile() {
+// ----------------- Config -----------------
+function defaultConfig() {
+  return {
+    ask_enabled: true,
+    skip_next: false,
+    ask_interval_minutes: 15,
+    notifications_enabled: true,
+    backup_keep_days: 10,
+  };
+}
+function ensureDirsAndFiles() {
+  if (!fs.existsSync(USERDATA)) fs.mkdirSync(USERDATA, { recursive: true });
+  if (!fs.existsSync(APP_BACKUP_DIR)) fs.mkdirSync(APP_BACKUP_DIR, { recursive: true });
+  if (!fs.existsSync(USERDATA_BACKUP_DIR)) fs.mkdirSync(USERDATA_BACKUP_DIR, { recursive: true });
+  BACKUP_DIR = fs.existsSync(APP_BACKUP_DIR) ? APP_BACKUP_DIR : USERDATA_BACKUP_DIR;
+  if (!fs.existsSync(DATA_FILE)) writeJsonAtomic(DATA_FILE, []);
+  if (!fs.existsSync(CONFIG_FILE)) writeJsonAtomic(CONFIG_FILE, defaultConfig());
+  if (!fs.existsSync(LOG_FILE)) fs.writeFileSync(LOG_FILE, "");
+}
+function loadConfig() {
+  ensureDirsAndFiles();
+  const cfg = readJsonSafe(CONFIG_FILE, defaultConfig());
+  return Object.assign(defaultConfig(), cfg);
+}
+function saveConfig(cfg) {
+  writeJsonAtomic(CONFIG_FILE, cfg);
+}
+
+// ----------------- Backup (One per day) -----------------
+function createBackup() {
+  ensureDirsAndFiles();
+  const cfg = loadConfig();
+  const today = new Date().toISOString().slice(0, 10);
+  const filename = `data-${today}.json`;
+  const dest = path.join(BACKUP_DIR, filename);
   try {
-    if (!fs.existsSync(app.getPath("userData"))) {
-      fs.mkdirSync(app.getPath("userData"), { recursive: true });
+    const data = readJsonSafe(DATA_FILE, []) || [];
+    writeJsonAtomic(dest, data);
+    console.info(`Backup updated: ${dest}`);
+    pruneBackups(cfg.backup_keep_days || 10);
+  } catch (e) {
+    console.error("Backup failed:", e);
+  }
+}
+function pruneBackups(keepDays = 10) {
+  try {
+    const files = fs.readdirSync(BACKUP_DIR)
+      .filter(f => /^data-\d{4}-\d{2}-\d{2}\.json$/.test(f))
+      .map(f => ({ f, t: fs.statSync(path.join(BACKUP_DIR, f)).mtimeMs }))
+      .sort((a, b) => b.t - a.t)
+      .map(x => x.f);
+    for (let i = keepDays; i < files.length; i++) {
+      fs.unlinkSync(path.join(BACKUP_DIR, files[i]));
     }
-
-    if (!fs.existsSync(DATA_FILE)) {
-      writeJsonAtomic(DATA_FILE, []);
-    }
-
-    try {
-      if (!fs.existsSync(APP_BACKUP_DIR)) {
-        fs.mkdirSync(APP_BACKUP_DIR, { recursive: true });
-      }
-      BACKUP_DIR = APP_BACKUP_DIR;
-    } catch {
-      if (!fs.existsSync(USERDATA_BACKUP_DIR)) {
-        fs.mkdirSync(USERDATA_BACKUP_DIR, { recursive: true });
-      }
-      BACKUP_DIR = USERDATA_BACKUP_DIR;
-      console.warn(`App directory not writable; using userData for backups: ${BACKUP_DIR}`);
-    }
-
-    if (!fs.existsSync(BACKUP_DIR)) {
-      fs.mkdirSync(BACKUP_DIR, { recursive: true });
-    }
-  } catch (err) {
-    console.error("ensureDataFile error:", err);
+  } catch (e) {
+    console.error("Prune backup error:", e);
   }
 }
 
-// ----------------- Save / backup -----------------
-let unsavedCounter = 0;
-
+// ----------------- Data -----------------
+function readEntries(limit = 50) {
+  const arr = readJsonSafe(DATA_FILE, []);
+  return Array.isArray(arr) ? arr.slice(0, limit) : [];
+}
 function saveEntry(text) {
-  ensureDataFile();
-  const data = readJson(DATA_FILE);
-  data.unshift({ text, ts: new Date().toISOString() });
-  try {
-    writeJsonAtomic(DATA_FILE, data);
-  } catch (err) {
-    console.error("writeJsonAtomic failed:", err);
-    try {
-      fs.appendFileSync(DATA_FILE + ".log", JSON.stringify({ text, ts: new Date().toISOString() }) + "\n", "utf8");
-    } catch (e) {
-      console.error("fallback append failed:", e);
-    }
-  }
+  const arr = readJsonSafe(DATA_FILE, []);
+  arr.unshift({ text, ts: new Date().toISOString() });
+  writeJsonAtomic(DATA_FILE, arr);
   unsavedCounter++;
   if (unsavedCounter >= 20) {
     createBackup();
@@ -119,167 +123,213 @@ function saveEntry(text) {
   }
 }
 
-function createBackup() {
-  ensureDataFile();
-  const data = readJson(DATA_FILE);
-  const dest = path.join(BACKUP_DIR, `data-${Date.now()}.json`);
+// ----------------- Notifications -----------------
+function systemNotificationsAvailable() {
+  if (process.env.WORK_TRACKER_DISABLE_NOTIFICATIONS === "1") return false;
+  if (process.platform !== "linux") return true;
+  if (!process.env.DISPLAY && !process.env.XDG_RUNTIME_DIR) return false;
   try {
-    writeJsonAtomic(dest, data);
-  } catch (err) {
-    console.error("createBackup write failed:", err);
+    const ver = fs.readFileSync("/proc/version", "utf8").toLowerCase();
+    if (ver.includes("microsoft") || ver.includes("wsl")) return false;
+  } catch {}
+  return true;
+}
+
+function showSystemNotification(title, body) {
+  try {
+    const notif = new Notification({ title, body });
+    notif.show();
+  } catch (e) {
+    console.warn("showSystemNotification failed", e);
+  }
+}
+
+// ----------------- UI Helpers -----------------
+function bringWindowToFront() {
+  if (!mainWindow) return;
+  try {
+    if (mainWindow.isMinimized && mainWindow.isMinimized()) {
+      try { mainWindow.restore(); } catch (e) {}
+    }
+    try { mainWindow.show(); } catch (e) {}
+    try { mainWindow.setAlwaysOnTop(true, "screen-saver"); } catch (e) {}
+    try { mainWindow.focus(); } catch (e) {}
+    setTimeout(() => {
+      try { mainWindow.setAlwaysOnTop(false); } catch (e) {}
+    }, 900);
+  } catch (e) {
+    console.error("bringWindowToFront error", e);
+  }
+}
+
+// ----------------- Force-front helper (retries) -----------------
+async function forceWindowToFront(retries = 3) {
+  if (!mainWindow) return;
+  try {
+    try { mainWindow.setFocusable(true); } catch (e) {}
+    if (mainWindow.isMinimized && mainWindow.isMinimized()) {
+      try { mainWindow.restore(); } catch (e) {}
+    }
+    try { mainWindow.show(); } catch (e) {}
+    try { mainWindow.setVisibleOnAllWorkspaces(true); } catch (e) {}
+    try { mainWindow.setAlwaysOnTop(true, "screen-saver"); } catch (e) {}
+    try { if (app && typeof app.focus === "function") app.focus(); } catch (e) {}
+    try { mainWindow.focus(); } catch (e) {}
+    setTimeout(() => {
+      try { mainWindow.webContents.send("open-prompt"); } catch (e) {}
+    }, 120);
+    setTimeout(() => {
+      try { mainWindow.setAlwaysOnTop(false); } catch (e) {}
+      try { mainWindow.setVisibleOnAllWorkspaces(false); } catch (e) {}
+    }, 900);
+    if (retries > 0) {
+      setTimeout(async () => {
+        try {
+          const focused = typeof mainWindow.isFocused === "function" ? mainWindow.isFocused() : false;
+          if (!focused) await forceWindowToFront(retries - 1);
+        } catch {}
+      }, 500);
+    }
+  } catch (e) {
+    console.error("forceWindowToFront error", e);
+  }
+}
+
+// ----------------- Prompt -----------------
+function showPrompt() {
+  const cfg = loadConfig();
+  if (!cfg.ask_enabled) return;
+  if (cfg.skip_next) {
+    cfg.skip_next = false;
+    saveConfig(cfg);
     return;
   }
 
-  // prune old backups (keep last 10)
-  try {
-    const files = fs
-      .readdirSync(BACKUP_DIR)
-      .map((f) => ({ f, t: fs.statSync(path.join(BACKUP_DIR, f)).mtimeMs }))
-      .sort((a, b) => b.t - a.t)
-      .map((x) => x.f);
+  // Force front aggressively
+  forceWindowToFront();
 
-    for (let i = 10; i < files.length; i++) {
-      try {
-        fs.unlinkSync(path.join(BACKUP_DIR, files[i]));
-      } catch (e) {
-        // ignore
-      }
+  // Notifications allowed?
+  const notifAllowed = cfg.notifications_enabled && systemNotificationsAvailable();
+  if (notifAllowed) {
+    try {
+      const notif = new Notification({ title: "What are you working on?", body: "Click to log your activity." });
+      notif.on("click", () => {
+        forceWindowToFront();
+      });
+      notif.show();
+    } catch (e) {
+      try { mainWindow?.webContents.send("open-prompt"); } catch (e) {}
     }
-  } catch (err) {
-    console.error("prune backups failed:", err);
+  } else {
+    try { mainWindow?.webContents.send("open-prompt"); } catch (e) {}
   }
 }
 
-function readEntries(limit = 50) {
-  ensureDataFile();
-  return readJson(DATA_FILE).slice(0, limit);
+// ----------------- Timer -----------------
+function startTimerFromConfig() {
+  stopTimer();
+  const cfg = loadConfig();
+  const mins = Math.max(1, cfg.ask_interval_minutes || 15);
+  const ms = mins * 60 * 1000;
+  timer = setInterval(showPrompt, ms);
+  setTimeout(showPrompt, 300);
+  console.info(`Timer started with ${mins} minute interval`);
+}
+function stopTimer() {
+  if (timer) clearInterval(timer);
+  timer = null;
 }
 
-// ----------------- UI / Timer -----------------
+// ----------------- Window -----------------
 function createMainWindow() {
   mainWindow = new BrowserWindow({
     width: 760,
     height: 600,
-    webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
-      contextIsolation: true,
-    },
+    focusable: true,
+    alwaysOnTop: false,
+    webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true },
   });
-
   mainWindow.loadFile(path.join(__dirname, "index.html"));
   mainWindow.on("closed", () => (mainWindow = null));
 }
 
-/**
- * showPromptNotification:
- * - If notifications are enabled, attempt to show a Notification wrapped in try/catch.
- * - Otherwise, fallback to opening the app and sending 'open-prompt' to renderer.
- */
-function showPromptNotification() {
-  if (!mainWindow) return;
+// ----------------- Helper: schedule confirmation notifications after settings change -----------------
+function scheduleSettingConfirmation(cfg) {
+  // clear existing scheduled confirmation
+  if (scheduledSettingConfirmation) {
+    clearTimeout(scheduledSettingConfirmation);
+    scheduledSettingConfirmation = null;
+  }
 
-  const openPromptFallback = () => {
+  // If notifications disabled by config or system, do not schedule
+  if (!cfg.notifications_enabled || !systemNotificationsAvailable()) return;
+
+  const mins = Math.max(1, Number(cfg.ask_interval_minutes) || 15);
+  // One-time confirmation at next scheduled interval
+  scheduledSettingConfirmation = setTimeout(() => {
     try {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.show();
-      mainWindow.focus();
-      mainWindow.webContents.send("open-prompt");
+      showSystemNotification("Work Tracker", `Next prompt will appear in ${mins} minute(s).`);
     } catch (e) {
-      console.error("openPromptFallback failed:", e);
+      console.warn("scheduledSettingConfirmation failed", e);
+    } finally {
+      scheduledSettingConfirmation = null;
     }
-  };
-
-  if (!NOTIFICATIONS_ENABLED) {
-    // Silent mode — open prompt directly
-    console.info("Notifications disabled by heuristic/env; opening prompt directly.");
-    openPromptFallback();
-    return;
-  }
-
-  // Try native Notification
-  try {
-    const notif = new Notification({
-      title: "What are you working on?",
-      body: "Click to enter your current task.",
-    });
-
-    notif.on("click", () => {
-      try {
-        if (mainWindow.isMinimized()) mainWindow.restore();
-        mainWindow.show();
-        mainWindow.focus();
-        mainWindow.webContents.send("open-prompt");
-      } catch (e) {
-        console.error("Notification click handler failed:", e);
-      }
-    });
-
-    // show() may throw if DBus/portal missing; guard it
-    try {
-      notif.show();
-    } catch (e) {
-      console.warn("Notification.show() threw — falling back to open prompt.", e);
-      openPromptFallback();
-    }
-  } catch (err) {
-    console.warn("Creating Notification failed — falling back to open prompt.", err);
-    openPromptFallback();
-  }
+  }, mins * 60 * 1000);
 }
-
-function startTimer() {
-  stopTimer();
-  timer = setInterval(showPromptNotification, askIntervalMs);
-  // small delay to ensure window ready
-  setTimeout(showPromptNotification, 300);
-}
-
-function stopTimer() {
-  if (timer) clearInterval(timer);
-}
-
-// ----------------- App lifecycle -----------------
-app.whenReady().then(() => {
-  createMainWindow();
-  ensureDataFile();
-  startTimer();
-
-  app.on("activate", () => {
-    if (!mainWindow) createMainWindow();
-  });
-});
-
-app.on("before-quit", () => {
-  try {
-    createBackup();
-  } catch (e) {
-    console.error("Error during before-quit backup:", e);
-  }
-});
-
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
-});
 
 // ----------------- IPC -----------------
 ipcMain.handle("read-entries", () => readEntries());
-ipcMain.handle("save-entry", (evt, text) => {
+ipcMain.handle("save-entry", (_, text) => {
   saveEntry(text);
   return readEntries();
 });
-ipcMain.handle("set-interval-minutes", (evt, mins) => {
-  askIntervalMs = Math.max(1, Number(mins)) * 60 * 1000;
-  startTimer();
-  return { ok: true, minutes: askIntervalMs / (60 * 1000) };
-});
-ipcMain.handle("create-backup", () => {
-  createBackup();
-  return { ok: true };
-});
-ipcMain.handle("get-backup-path", () => {
-  ensureDataFile();
-  return BACKUP_DIR;
+ipcMain.handle("create-backup", () => { createBackup(); return { ok: true }; });
+ipcMain.handle("get-backup-path", () => BACKUP_DIR);
+
+ipcMain.handle("get-config", () => loadConfig());
+ipcMain.handle("set-config", (_, partial) => {
+  const oldCfg = loadConfig();
+  const cfg = Object.assign(oldCfg, partial);
+  saveConfig(cfg);
+
+  // restart timer if interval changed
+  if (partial.ask_interval_minutes !== undefined) startTimerFromConfig();
+
+  // send immediate system notification confirming change (if allowed)
+  if (cfg.notifications_enabled && systemNotificationsAvailable()) {
+    try {
+      showSystemNotification("Work Tracker settings saved", `Interval: ${cfg.ask_interval_minutes} minute(s)`);
+    } catch (e) {
+      console.warn("Immediate setting notification failed", e);
+    }
+  }
+
+  // schedule a one-time confirmation at next interval (only if notifications allowed)
+  scheduleSettingConfirmation(cfg);
+
+  return cfg;
 });
 
-// ensure we have dirs
-ensureDataFile();
+ipcMain.handle("skip-next", () => {
+  const cfg = loadConfig();
+  cfg.skip_next = true;
+  saveConfig(cfg);
+  return cfg;
+});
+ipcMain.handle("get-userdata-path", () => USERDATA);
+
+// ----------------- App Lifecycle -----------------
+app.whenReady().then(() => {
+  ensureDirsAndFiles();
+  createMainWindow();
+  startTimerFromConfig();
+  // schedule confirmation for current config on startup if notifications allowed
+  scheduleSettingConfirmation(loadConfig());
+  app.on("activate", () => { if (!mainWindow) createMainWindow(); });
+});
+
+app.on("before-quit", () => {
+  try { createBackup(); } catch (e) { console.error("Backup on quit failed", e); }
+});
+
+app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });

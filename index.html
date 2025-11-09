@@ -1,43 +1,141 @@
 <!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Work Tracker</title>
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'">
-    <link rel="stylesheet" href="./styles.css" />
-  </head>
-  <body>
-    <header>
-      <div>
-        <h1>Work Tracker</h1>
-        <div class="status">
-          <span id="last-backup">No backups yet</span>
-          <span>Backup location: <span id="backup-location">—</span></span>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Work Tracker — Clean</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div id="app" class="app-grid">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="logo">WT</div>
+        <div>
+          <div class="app-title">Work Tracker</div>
+          <div class="app-sub">Quick logging • Daily backup</div>
         </div>
       </div>
-      <div class="controls">
-        <label>Ask every <input id="interval-min" type="number" min="1" value="15" /> min</label>
-        <button id="save-interval" class="ghost">Save</button>
-        <button id="backup-now" class="primary">Backup Now</button>
+
+      <nav class="nav">
+        <button class="nav-btn active" id="btn-dashboard">Dashboard</button>
+        <button class="nav-btn" id="btn-entries">Entries</button>
+        <button class="nav-btn" id="btn-settings">Settings</button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <small id="backup-location">Backup: —</small>
+        <small id="last-backup">Last: —</small>
       </div>
-    </header>
+    </aside>
 
-    <section>
-      <strong>Recent entries</strong>
-      <div id="entries"></div>
-    </section>
-
-    <div id="prompt-modal" class="modal">
-      <div class="card">
-        <h3>What are you currently working on?</h3>
-        <textarea id="prompt-text" placeholder="Type your task..."></textarea>
-        <div class="row">
-          <button id="dismiss" class="ghost">Dismiss</button>
-          <button id="save-entry" class="primary">Save</button>
+    <main class="main">
+      <header class="main-head">
+        <div>
+          <h1 id="page-title">Dashboard</h1>
+          <p class="muted" id="page-sub">A quick way to capture what you're working on — every <span id="current-interval">15</span> minutes.</p>
         </div>
+
+        <div class="header-actions">
+          <button id="open-prompt-btn" class="primary">Log now</button>
+          <button id="backup-now" class="ghost">Backup</button>
+        </div>
+      </header>
+
+      <section id="dashboard-view" class="panel grid-2">
+        <div class="card">
+          <h3>Quick add</h3>
+          <textarea id="quick-text" placeholder="What are you working on right now?"></textarea>
+          <div class="row">
+            <button id="quick-save" class="primary">Save</button>
+            <button id="quick-save-ask" class="ghost">Save & Ask later</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Upcoming</h3>
+          <div class="info-line">
+            <div>
+              <div class="info-label">Interval</div>
+              <div id="info-interval" class="info-value">15 min</div>
+            </div>
+            <div>
+              <div class="info-label">Prompts</div>
+              <div id="info-ask-enabled" class="info-value">On</div>
+            </div>
+            <div>
+              <div class="info-label">Notifications</div>
+              <div id="info-notif" class="info-value">On</div>
+            </div>
+          </div>
+
+          <hr>
+
+          <h4>Recent entries</h4>
+          <div id="recent-entries" class="entries"></div>
+        </div>
+      </section>
+
+      <section id="entries-view" class="panel hidden">
+        <div class="subhead">
+          <h3>All Entries</h3>
+          <input id="search" placeholder="Search entries..." />
+        </div>
+        <div id="entries" class="entries full"></div>
+      </section>
+
+      <section id="settings-view" class="panel hidden">
+        <h3>Settings</h3>
+        <div class="settings-grid">
+          <label class="field">
+            <span class="label">Ask interval (minutes)</span>
+            <input id="interval-min" type="number" min="1" />
+          </label>
+
+          <label class="field switch">
+            <span class="label">Enable prompts</span>
+            <input id="ask-toggle" type="checkbox" />
+          </label>
+
+          <label class="field switch">
+            <span class="label">System notifications</span>
+            <input id="notif-toggle" type="checkbox" />
+          </label>
+
+          <label class="field">
+            <span class="label">Backup keep days</span>
+            <input id="backup-days" type="number" min="1" />
+          </label>
+        </div>
+
+        <div class="row" style="margin-top:12px;">
+          <button id="save-settings" class="primary">Save Settings</button>
+          <button id="reset-settings" class="ghost">Reset to defaults</button>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- modal prompt -->
+  <div id="prompt-modal" class="modal" aria-hidden="true">
+    <div class="modal-card">
+      <header>
+        <strong>What are you currently working on?</strong>
+      </header>
+      <textarea id="prompt-text" placeholder="Describe your current task..."></textarea>
+      <div class="row">
+        <button id="skip-this" class="ghost">Skip this time</button>
+        <button id="save-dontask" class="ghost">Save & stop prompts</button>
+        <button id="save-ask" class="primary">Save</button>
       </div>
+      <button id="modal-close" class="btn-close" aria-label="Close">✕</button>
     </div>
+  </div>
 
-    <script src="./renderer.js"></script>
-  </body>
+  <!-- toast root -->
+  <div id="toast-root"></div>
+
+  <script src="./renderer.js"></script>
+</body>
 </html>
