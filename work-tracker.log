@@ -1,0 +1,7 @@
+nohup: ignoring input
+
+> work-tracker@1.0.0 start
+> electron .
+
+[246004:1107/091316.820447:ERROR:object_proxy.cc(590)] Failed to call method: org.freedesktop.portal.Settings.Read: object_path= /org/freedesktop/portal/desktop: org.freedesktop.DBus.Error.ServiceUnknown: The name org.freedesktop.portal.Desktop was not provided by any .service files
+Notifications disabled by heuristic/env; opening prompt directly.

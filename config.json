@@ -1,0 +1,8 @@
+{
+  "ask_enabled": true,
+  "ask_interval_minutes": 15,
+  "notifications_enabled": true,
+  "backup_keep_days": 10,
+  "dark_mode": false,
+  "compact_mode": false
+}
