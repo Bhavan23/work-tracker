@@ -1,28 +1,48 @@
-const { app, BrowserWindow, Notification, ipcMain, Tray, nativeImage } = require("electron");
+const { app, BrowserWindow, Notification, ipcMain } = require("electron");
 const path = require("path");
 const fs = require("fs");
 
 // ----------------- Config / paths -----------------
-// DATA_FILE stays in userData (safe for packaged apps)
 const DATA_FILE = path.join(app.getPath("userData"), "data.json");
-const TEMP_FILE = DATA_FILE + ".tmp";
-
-// Prefer backups in app directory (useful in development).
-// If not writable (packaged app), fall back to userData backups.
 const APP_BACKUP_DIR = path.join(__dirname, "backups");
 const USERDATA_BACKUP_DIR = path.join(app.getPath("userData"), "backups");
-let BACKUP_DIR = APP_BACKUP_DIR; // will be finalized in ensureDataFile()
+let BACKUP_DIR = APP_BACKUP_DIR;
 
-let mainWindow;
+// timer config
 let askIntervalMs = 15 * 60 * 1000; // default 15 minutes
 let timer = null;
-let tray = null;
+let mainWindow = null;
 
-// ----------------- Helpers (atomic JSON write/read) -----------------
+// ----------------- Notification enable/disable logic -----------------
+// Allow forcing disable via env var for headless / CI / WSL
+const ENV_DISABLE_NOTIFS = !!process.env.WORK_TRACKER_DISABLE_NOTIFICATIONS;
+
+// Heuristics: on linux, if DISPLAY or XDG_RUNTIME_DIR are missing, notifications likely won't work.
+// Also disable on WSL (detect via /proc/version containing Microsoft)
+function isRunningOnWSL() {
+  try {
+    const ver = fs.readFileSync("/proc/version", "utf8").toLowerCase();
+    return ver.includes("microsoft") || ver.includes("wsl");
+  } catch {
+    return false;
+  }
+}
+
+function notificationsLikelyAvailable() {
+  if (ENV_DISABLE_NOTIFS) return false;
+  if (process.platform !== "linux") return true; // mac/win usually ok
+  // linux heuristics
+  if (!process.env.DISPLAY && !process.env.XDG_RUNTIME_DIR) return false;
+  if (isRunningOnWSL()) return false;
+  return true;
+}
+
+const NOTIFICATIONS_ENABLED = notificationsLikelyAvailable();
+
+// ----------------- Helpers -----------------
 function writeJsonAtomic(filePath, obj) {
   const tmp = filePath + ".tmp";
   const data = JSON.stringify(obj, null, 2);
-  // write to temp file then fsync and rename
   const fd = fs.openSync(tmp, "w");
   try {
     fs.writeSync(fd, data, null, "utf8");
@@ -39,32 +59,27 @@ function readJson(filePath) {
     const raw = fs.readFileSync(filePath, "utf8");
     return JSON.parse(raw || "[]");
   } catch (err) {
-    console.error("readJson error, returning []:", err);
+    console.error("readJson error:", err);
     return [];
   }
 }
 
-// ----------------- Ensure data + backup dirs -----------------
 function ensureDataFile() {
   try {
-    // ensure userData directory exists
     if (!fs.existsSync(app.getPath("userData"))) {
       fs.mkdirSync(app.getPath("userData"), { recursive: true });
     }
 
-    // ensure data file exists
     if (!fs.existsSync(DATA_FILE)) {
       writeJsonAtomic(DATA_FILE, []);
     }
 
-    // try to create app-level backup dir first (useful in dev)
     try {
       if (!fs.existsSync(APP_BACKUP_DIR)) {
         fs.mkdirSync(APP_BACKUP_DIR, { recursive: true });
       }
       BACKUP_DIR = APP_BACKUP_DIR;
-    } catch (err) {
-      // fallback to userData backup dir if app dir not writable
+    } catch {
       if (!fs.existsSync(USERDATA_BACKUP_DIR)) {
         fs.mkdirSync(USERDATA_BACKUP_DIR, { recursive: true });
       }
@@ -72,7 +87,6 @@ function ensureDataFile() {
       console.warn(`App directory not writable; using userData for backups: ${BACKUP_DIR}`);
     }
 
-    // ensure chosen backup dir exists
     if (!fs.existsSync(BACKUP_DIR)) {
       fs.mkdirSync(BACKUP_DIR, { recursive: true });
     }
@@ -81,138 +95,153 @@ function ensureDataFile() {
   }
 }
 
-// ----------------- Save / backup logic -----------------
+// ----------------- Save / backup -----------------
 let unsavedCounter = 0;
 
 function saveEntry(text) {
   ensureDataFile();
   const data = readJson(DATA_FILE);
   data.unshift({ text, ts: new Date().toISOString() });
-
   try {
     writeJsonAtomic(DATA_FILE, data);
-    unsavedCounter += 1;
-    if (unsavedCounter >= 20) {
-      createBackup();
-      unsavedCounter = 0;
-    }
   } catch (err) {
-    console.error("Failed to save entry:", err);
-    // fallback append-only log
+    console.error("writeJsonAtomic failed:", err);
     try {
-      const fallback = JSON.stringify({ text, ts: new Date().toISOString() }) + "\n";
-      fs.appendFileSync(DATA_FILE + ".log", fallback, "utf8");
+      fs.appendFileSync(DATA_FILE + ".log", JSON.stringify({ text, ts: new Date().toISOString() }) + "\n", "utf8");
     } catch (e) {
-      console.error("Fallback append failed:", e);
+      console.error("fallback append failed:", e);
     }
+  }
+  unsavedCounter++;
+  if (unsavedCounter >= 20) {
+    createBackup();
+    unsavedCounter = 0;
   }
 }
 
 function createBackup() {
+  ensureDataFile();
+  const data = readJson(DATA_FILE);
+  const dest = path.join(BACKUP_DIR, `data-${Date.now()}.json`);
   try {
-    ensureDataFile();
-    const data = readJson(DATA_FILE);
-    const name = `data-${Date.now()}.json`;
-    const dest = path.join(BACKUP_DIR, name);
     writeJsonAtomic(dest, data);
+  } catch (err) {
+    console.error("createBackup write failed:", err);
+    return;
+  }
 
-    // prune old backups (keep last 10)
-    const files = fs.readdirSync(BACKUP_DIR)
+  // prune old backups (keep last 10)
+  try {
+    const files = fs
+      .readdirSync(BACKUP_DIR)
       .map((f) => ({ f, t: fs.statSync(path.join(BACKUP_DIR, f)).mtimeMs }))
       .sort((a, b) => b.t - a.t)
       .map((x) => x.f);
 
-    const keep = 10;
-    for (let i = keep; i < files.length; i++) {
+    for (let i = 10; i < files.length; i++) {
       try {
         fs.unlinkSync(path.join(BACKUP_DIR, files[i]));
-      } catch (err) {
+      } catch (e) {
         // ignore
       }
     }
   } catch (err) {
-    console.error("createBackup error:", err);
+    console.error("prune backups failed:", err);
   }
 }
 
 function readEntries(limit = 50) {
   ensureDataFile();
-  const data = readJson(DATA_FILE);
-  return data.slice(0, limit);
+  return readJson(DATA_FILE).slice(0, limit);
 }
 
 // ----------------- UI / Timer -----------------
 function createMainWindow() {
   mainWindow = new BrowserWindow({
-    width: 720,
-    height: 560,
+    width: 760,
+    height: 600,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
-      nodeIntegration: false,
     },
   });
 
   mainWindow.loadFile(path.join(__dirname, "index.html"));
-
-  mainWindow.on("closed", () => {
-    mainWindow = null;
-  });
+  mainWindow.on("closed", () => (mainWindow = null));
 }
 
+/**
+ * showPromptNotification:
+ * - If notifications are enabled, attempt to show a Notification wrapped in try/catch.
+ * - Otherwise, fallback to opening the app and sending 'open-prompt' to renderer.
+ */
 function showPromptNotification() {
-  const notif = new Notification({
-    title: "What are you currently working on?",
-    body: "Click to enter what you are working on (or open the app).",
-    silent: false,
-  });
+  if (!mainWindow) return;
 
-  notif.on("click", () => {
-    if (mainWindow) {
+  const openPromptFallback = () => {
+    try {
       if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
       mainWindow.focus();
       mainWindow.webContents.send("open-prompt");
+    } catch (e) {
+      console.error("openPromptFallback failed:", e);
     }
-  });
+  };
 
-  notif.show();
-  if (mainWindow) mainWindow.webContents.send("open-prompt");
+  if (!NOTIFICATIONS_ENABLED) {
+    // Silent mode — open prompt directly
+    console.info("Notifications disabled by heuristic/env; opening prompt directly.");
+    openPromptFallback();
+    return;
+  }
+
+  // Try native Notification
+  try {
+    const notif = new Notification({
+      title: "What are you working on?",
+      body: "Click to enter your current task.",
+    });
+
+    notif.on("click", () => {
+      try {
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.show();
+        mainWindow.focus();
+        mainWindow.webContents.send("open-prompt");
+      } catch (e) {
+        console.error("Notification click handler failed:", e);
+      }
+    });
+
+    // show() may throw if DBus/portal missing; guard it
+    try {
+      notif.show();
+    } catch (e) {
+      console.warn("Notification.show() threw — falling back to open prompt.", e);
+      openPromptFallback();
+    }
+  } catch (err) {
+    console.warn("Creating Notification failed — falling back to open prompt.", err);
+    openPromptFallback();
+  }
 }
 
 function startTimer() {
   stopTimer();
-  timer = setInterval(() => {
-    showPromptNotification();
-  }, askIntervalMs);
-  // show immediately
-  showPromptNotification();
+  timer = setInterval(showPromptNotification, askIntervalMs);
+  // small delay to ensure window ready
+  setTimeout(showPromptNotification, 300);
 }
 
 function stopTimer() {
-  if (timer) {
-    clearInterval(timer);
-    timer = null;
-  }
+  if (timer) clearInterval(timer);
 }
 
 // ----------------- App lifecycle -----------------
 app.whenReady().then(() => {
   createMainWindow();
   ensureDataFile();
-
-  // tray (optional)
-  try {
-    const iconPath = path.join(__dirname, "icon.png");
-    const trayImage = fs.existsSync(iconPath) ? nativeImage.createFromPath(iconPath) : undefined;
-    tray = new Tray(trayImage || undefined);
-    tray.setToolTip("Work Tracker");
-    tray.on("click", () => {
-      if (mainWindow) mainWindow.show();
-    });
-  } catch (e) {
-    console.warn("Tray not available:", e.message);
-  }
-
   startTimer();
 
   app.on("activate", () => {
@@ -220,54 +249,37 @@ app.whenReady().then(() => {
   });
 });
 
-function gracefulShutdown() {
-  try {
-    stopTimer();
-    createBackup();
-  } catch (err) {
-    console.error("gracefulShutdown error:", err);
-  }
-}
-
 app.on("before-quit", () => {
-  gracefulShutdown();
+  try {
+    createBackup();
+  } catch (e) {
+    console.error("Error during before-quit backup:", e);
+  }
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    app.quit();
-  }
+  if (process.platform !== "darwin") app.quit();
 });
 
 // ----------------- IPC -----------------
-ipcMain.handle("read-entries", () => {
-  return readEntries();
-});
-
+ipcMain.handle("read-entries", () => readEntries());
 ipcMain.handle("save-entry", (evt, text) => {
   saveEntry(text);
   return readEntries();
 });
-
-ipcMain.handle("set-interval-minutes", (evt, minutes) => {
-  const ms = Math.max(1, Number(minutes)) * 60 * 1000;
-  askIntervalMs = ms;
+ipcMain.handle("set-interval-minutes", (evt, mins) => {
+  askIntervalMs = Math.max(1, Number(mins)) * 60 * 1000;
   startTimer();
-  return { ok: true, minutes };
+  return { ok: true, minutes: askIntervalMs / (60 * 1000) };
 });
-
 ipcMain.handle("create-backup", () => {
   createBackup();
   return { ok: true };
 });
-
-// new: return the active backup directory path
 ipcMain.handle("get-backup-path", () => {
   ensureDataFile();
   return BACKUP_DIR;
 });
 
-// ensure directories early
+// ensure we have dirs
 ensureDataFile();
-
-module.exports = { DATA_FILE, BACKUP_DIR };

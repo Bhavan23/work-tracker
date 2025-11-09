@@ -1,0 +1,144 @@
+:root {
+  --bg: #f7f9fb;
+  --card-bg: #fff;
+  --accent: #0078d7;
+  --accent-hover: #005ea8;
+  --border: #e5e7eb;
+  --text: #111827;
+  --muted: #6b7280;
+  --shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  color: var(--text);
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--card-bg);
+  padding: 16px 20px;
+  box-shadow: var(--shadow);
+  border-radius: 10px;
+  margin: 16px auto;
+  max-width: 900px;
+}
+
+h1 { margin: 0; color: var(--accent); font-size: 22px; }
+
+.controls { display: flex; gap: 10px; align-items: center; }
+
+input[type="number"] {
+  width: 70px;
+  padding: 6px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
+button {
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: none;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+button.primary {
+  background: var(--accent);
+  color: white;
+}
+
+button.primary:hover {
+  background: var(--accent-hover);
+}
+
+button.ghost {
+  background: #f3f4f6;
+}
+
+button.ghost:hover {
+  background: #e5e7eb;
+}
+
+section {
+  background: var(--card-bg);
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 20px;
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+}
+
+#entries {
+  background: #fafafa;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-top: 10px;
+  max-height: 480px;
+  overflow-y: auto;
+}
+
+.entry {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.entry:hover {
+  background: #f1f5f9;
+}
+
+.ts { font-size: 12px; color: var(--muted); }
+
+.no-entry {
+  padding: 16px;
+  text-align: center;
+  color: var(--muted);
+}
+
+/* Modal */
+.modal {
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(4px);
+}
+
+.modal.open { display: flex; }
+
+.card {
+  background: var(--card-bg);
+  width: 480px;
+  padding: 20px;
+  border-radius: 12px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.25);
+  animation: fadeIn 0.25s ease-out;
+}
+
+textarea {
+  width: 100%;
+  height: 120px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  font-size: 14px;
+  outline: none;
+  resize: none;
+}
+
+textarea:focus { border-color: var(--accent); }
+
+.row { display: flex; justify-content: flex-end; gap: 10px; margin-top: 12px; }
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
