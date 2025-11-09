@@ -2,73 +2,97 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Work Tracker — Tabs UI</title>
+  <title>Work Tracker — Professional</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
   <div class="app">
+    <!-- Top App Bar -->
     <header class="topbar">
-      <!-- Make brand clickable to go Home/Dashboard -->
-      <button class="brand" id="brand-home" title="Go to Dashboard" style="all:unset;cursor:pointer;display:flex;align-items:center;gap:12px">
+      <!-- Brand -->
+      <button class="brand" id="brand-home" title="Go to Dashboard" type="button" style="all:unset;cursor:pointer;display:flex;align-items:center;gap:12px">
         <div class="logo">WT</div>
         <div class="title">Work Tracker</div>
       </button>
 
-      <!-- Tab bar with data-tab attributes (for delegation) -->
+      <!-- Tabs -->
       <nav class="tabs" id="tabs" role="tablist" aria-label="Main">
-        <button role="tab" aria-selected="true" class="tab active" data-tab="dashboard">Dashboard</button>
-        <button role="tab" class="tab" data-tab="entries">Entries</button>
-        <button role="tab" class="tab" data-tab="settings">Settings</button>
-        <button role="tab" class="tab" data-tab="backup">Backup</button>
+        <button id="tab-dashboard" role="tab" aria-selected="true" aria-controls="panel-dashboard" class="tab active" data-tab="dashboard" tabindex="0" type="button">Dashboard</button>
+        <button id="tab-entries"   role="tab" aria-selected="false" aria-controls="panel-entries"   class="tab" data-tab="entries"   tabindex="-1" type="button">Entries</button>
+        <button id="tab-settings"  role="tab" aria-selected="false" aria-controls="panel-settings"  class="tab" data-tab="settings"  tabindex="-1" type="button">Settings</button>
+        <button id="tab-backup"    role="tab" aria-selected="false" aria-controls="panel-backup"    class="tab" data-tab="backup"    tabindex="-1" type="button">Backup</button>
       </nav>
 
       <div class="top-actions">
-        <div id="countdown" class="countdown" title="Next prompt"></div>
-        <button id="open-prompt-btn" class="primary">Log now</button>
+        <div id="countdown" class="countdown" title="Next prompt" role="status" aria-live="polite">Next: --:--</div>
+        <button id="open-prompt-btn" class="primary" type="button">Log now</button>
       </div>
     </header>
 
+    <!-- Hero -->
+    <header class="hero">
+      <div class="hero-bg"></div>
+      <h1 class="app-title">Work Tracker</h1>
+      <p class="subtitle">
+        A Vibe-coded app to track your daily work — with built-in backups, better backup management,
+        and improved settings configuration.
+      </p>
+    </header>
+
+    <!-- Main Content -->
     <main class="container">
-      <section id="panel-dashboard" class="panel" role="tabpanel">
+      <!-- DASHBOARD -->
+      <section id="panel-dashboard" class="panel" role="tabpanel" aria-labelledby="tab-dashboard" aria-hidden="false">
+        <section class="stats">
+          <div class="stat-card"><div class="stat-title">Today</div><div class="stat-value" id="stat-today">0</div></div>
+          <div class="stat-card"><div class="stat-title">This week</div><div class="stat-value" id="stat-week">0</div></div>
+          <div class="stat-card"><div class="stat-title">Total</div><div class="stat-value" id="stat-total">0</div></div>
+          <div class="stat-card"><div class="stat-title">Streak (days)</div><div class="stat-value" id="stat-streak">0</div></div>
+        </section>
+
         <div class="panel-grid">
           <div class="card">
             <h3>Quick log</h3>
             <textarea id="quick-text" placeholder="What are you working on?"></textarea>
             <div class="row">
-              <button id="quick-save" class="primary">Save</button>
-              <button id="quick-save-ask" class="ghost">Save & Ask later</button>
+              <button id="quick-save" class="primary" type="button">Save</button>
+              <button id="quick-save-ask" class="ghost" type="button">Save & ask later</button>
             </div>
           </div>
 
           <div class="card">
-            <h3>Overview</h3>
-            <div class="info-grid">
-              <div><div class="label">Interval</div><div id="info-interval" class="big">15 min</div></div>
-              <div><div class="label">Prompts</div><div id="info-ask-enabled" class="big">On</div></div>
-              <div><div class="label">Notifications</div><div id="info-notif" class="big">On</div></div>
+            <div class="card-head">
+              <h3>Overview</h3>
+              <div class="pill-group">
+                <span class="pill"><span class="muted">Interval</span> <strong id="info-interval">15 min</strong></span>
+                <span class="pill"><span class="muted">Prompts</span> <strong id="info-ask-enabled">On</strong></span>
+                <span class="pill"><span class="muted">Notifications</span> <strong id="info-notif">On</strong></span>
+              </div>
             </div>
-            <hr />
+            <div class="divider"></div>
             <h4>Recent</h4>
-            <div id="recent-entries" class="entries"></div>
+            <div id="recent-entries" class="entries entries--recent"></div>
           </div>
         </div>
       </section>
 
-      <section id="panel-entries" class="panel hidden" role="tabpanel" aria-hidden="true">
+      <!-- ENTRIES -->
+      <section id="panel-entries" class="panel hidden" role="tabpanel" aria-labelledby="tab-entries" aria-hidden="true">
         <div class="subhead">
           <h3>Entries</h3>
-          <input id="search" placeholder="Search..." />
+          <input id="search" class="input" placeholder="Search entries..." />
         </div>
-        <div id="entries" class="entries full"></div>
+        <div id="entries" class="entries entries--full"></div>
       </section>
 
-      <section id="panel-settings" class="panel hidden" role="tabpanel" aria-hidden="true">
+      <!-- SETTINGS -->
+      <section id="panel-settings" class="panel hidden" role="tabpanel" aria-labelledby="tab-settings" aria-hidden="true">
         <h3>Settings</h3>
         <div class="settings-grid">
           <label class="field">
             <span class="label">Ask interval (minutes)</span>
-            <input id="interval-min" type="number" min="1" />
+            <input id="interval-min" class="input" type="number" min="1" />
           </label>
 
           <label class="field switch">
@@ -83,7 +107,7 @@
 
           <label class="field">
             <span class="label">Backup keep days</span>
-            <input id="backup-days" type="number" min="1" />
+            <input id="backup-days" class="input" type="number" min="1" />
           </label>
 
           <label class="field switch">
@@ -98,12 +122,13 @@
         </div>
 
         <div class="row" style="margin-top:12px;">
-          <button id="save-settings" class="primary">Save Settings</button>
-          <button id="reset-settings" class="ghost">Reset defaults</button>
+          <button id="save-settings" class="primary" type="button">Save Settings</button>
+          <button id="reset-settings" class="ghost" type="button">Reset defaults</button>
         </div>
       </section>
 
-      <section id="panel-backup" class="panel hidden" role="tabpanel" aria-hidden="true">
+      <!-- BACKUP -->
+      <section id="panel-backup" class="panel hidden" role="tabpanel" aria-labelledby="tab-backup" aria-hidden="true">
         <h3>Backup & Restore</h3>
         <div class="card">
           <div class="backup-row">
@@ -120,9 +145,9 @@
               <div id="backup-keep" class="muted">10</div>
             </div>
             <div class="backup-actions">
-              <button id="backup-now" class="primary">Backup Now</button>
-              <button id="open-backup-folder" class="ghost">Open Folder</button>
-              <button id="restore-btn" class="ghost">Restore from File</button>
+              <button id="backup-now" class="primary" type="button">Backup Now</button>
+              <button id="open-backup-folder" class="ghost" type="button">Open Folder</button>
+              <button id="restore-btn" class="ghost" type="button">Restore from File</button>
             </div>
           </div>
           <p class="muted" style="margin-top:10px">
@@ -133,20 +158,21 @@
     </main>
   </div>
 
-  <div id="prompt-modal" class="modal" aria-hidden="true">
-    <div class="modal-card">
-      <strong>What are you currently working on?</strong>
+  <!-- Prompt Modal -->
+  <div id="prompt-modal" class="modal" aria-hidden="true" aria-modal="true" role="dialog" aria-labelledby="prompt-title">
+    <div class="modal-card" role="document">
+      <strong id="prompt-title">What are you currently working on?</strong>
       <textarea id="prompt-text" placeholder="Describe your current task..."></textarea>
       <div class="row">
-        <button id="skip-this" class="ghost">Skip this time</button>
-        <button id="save-dontask" class="ghost">Save & stop prompts</button>
-        <button id="save-ask" class="primary">Save</button>
+        <button id="skip-this" class="ghost" type="button">Skip this time</button>
+        <button id="save-dontask" class="ghost" type="button">Save & stop prompts</button>
+        <button id="save-ask" class="primary" type="button">Save</button>
       </div>
-      <button id="modal-close" class="btn-close" aria-label="Close">✕</button>
+      <button id="modal-close" class="btn-close" aria-label="Close" type="button">✕</button>
     </div>
   </div>
 
-  <div id="toast-root"></div>
+  <div id="toast-root" role="status" aria-live="polite"></div>
   <script src="./renderer.js"></script>
 </body>
 </html>
