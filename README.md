@@ -74,3 +74,7 @@ work-tracker/
 
 ## License
 MIT License.
+
+## About
+This application is built using **Vibe Code**, a custom productivity framework designed to track daily work efficiently.
+
