@@ -1,26 +1,40 @@
-// renderer.js — tabs, countdown, restore, dark/compact toggles
+// renderer.js — tabs via event delegation + brand click + everything else unchanged
 const $ = s => document.querySelector(s);
-const tabs = {
-  dashboard: $('#tab-dashboard'),
-  entries: $('#tab-entries'),
-  settings: $('#tab-settings'),
-  backup: $('#tab-backup'),
-};
+
+// Panels map (ids unchanged)
 const panels = {
-  dashboard: $('#panel-dashboard'),
-  entries: $('#panel-entries'),
-  settings: $('#panel-settings'),
-  backup: $('#panel-backup'),
+  dashboard: document.getElementById('panel-dashboard'),
+  entries: document.getElementById('panel-entries'),
+  settings: document.getElementById('panel-settings'),
+  backup: document.getElementById('panel-backup'),
 };
 
 function setTab(active) {
-  Object.keys(tabs).forEach(k=>{
-    tabs[k].classList.toggle('active', k===active);
-    panels[k].classList.toggle('hidden', k!==active);
-    panels[k].setAttribute('aria-hidden', k!==active);
-    tabs[k].setAttribute('aria-selected', k===active ? 'true' : 'false');
+  // Toggle active class on tab buttons
+  document.querySelectorAll('#tabs .tab').forEach(btn=>{
+    const isActive = btn.dataset.tab === active;
+    btn.classList.toggle('active', isActive);
+    btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+  });
+  // Show/hide panels
+  Object.keys(panels).forEach(k=>{
+    const show = k === active;
+    panels[k].classList.toggle('hidden', !show);
+    panels[k].setAttribute('aria-hidden', show ? 'false' : 'true');
   });
 }
+
+// --- NEW: Event delegation for tabs (robust) ---
+document.getElementById('tabs').addEventListener('click', (e)=>{
+  const btn = e.target.closest('.tab[data-tab]');
+  if (!btn) return;
+  setTab(btn.dataset.tab);
+});
+
+// --- NEW: Brand click jumps to Dashboard ---
+document.getElementById('brand-home').addEventListener('click', ()=> setTab('dashboard'));
+
+// Keep the rest of your previous renderer.js logic:
 
 const quickText = $('#quick-text');
 const quickSaveBtn = $('#quick-save');
@@ -112,7 +126,7 @@ async function loadConfigToUI() {
   } catch (e) { console.error(e); }
 }
 
-// prompt modal
+// modal logic
 function openPrompt() { promptModal.classList.add('open'); promptText.value=''; setTimeout(()=>promptText.focus(),80); }
 function closePrompt(){ promptModal.classList.remove('open'); }
 $('#save-ask').addEventListener('click', async ()=>{
@@ -165,7 +179,7 @@ openBackupFolderBtn.addEventListener('click', async ()=> {
     }
   } catch (e) { console.error(e); toast('Open folder failed', 'error'); }
 });
-restoreBtn.addEventListener('click', async ()=> {
+document.getElementById('restore-btn')?.addEventListener('click', async ()=> {
   try {
     const res = await window.electronAPI.restoreFromFile();
     if (res && res.ok) {
@@ -174,9 +188,7 @@ restoreBtn.addEventListener('click', async ()=> {
     } else if (!res?.canceled) {
       toast(res?.error || 'Restore failed', 'error');
     }
-  } catch (e) {
-    console.error(e); toast('Restore failed', 'error');
-  }
+  } catch (e) { console.error(e); toast('Restore failed', 'error'); }
 });
 
 // settings save/reset
@@ -202,12 +214,6 @@ resetSettingsBtn.addEventListener('click', async ()=> {
   } catch { toast('Reset failed','error') }
 });
 
-// tabs
-document.getElementById('tab-dashboard').addEventListener('click', ()=>setTab('dashboard'));
-document.getElementById('tab-entries').addEventListener('click', ()=>setTab('entries'));
-document.getElementById('tab-settings').addEventListener('click', ()=>setTab('settings'));
-document.getElementById('tab-backup').addEventListener('click', ()=>setTab('backup'));
-
 // main → renderer events
 window.electronAPI.onOpenPrompt(()=>{ setTab('dashboard'); openPrompt(); });
 window.electronAPI.onApplyTheme(({dark, compact}) => applyThemeLocally({dark, compact}));
@@ -221,9 +227,9 @@ function formatMs(ms){
 async function tickCountdown(){
   try {
     const info = await window.electronAPI.getNextPromptInfo();
-    countdownEl.textContent = `Next: ${formatMs(info.remainingMs)} `;
+    document.getElementById('countdown').textContent = `Next: ${formatMs(info.remainingMs)} `;
   } catch {
-    countdownEl.textContent = '';
+    document.getElementById('countdown').textContent = '';
   }
 }
 setInterval(tickCountdown, 1000);
@@ -235,7 +241,7 @@ function applyThemeLocally({dark, compact}){
 }
 
 // search
-searchInput?.addEventListener('input', async e => {
+document.getElementById('search')?.addEventListener('input', async e => {
   const q = e.target.value.trim().toLowerCase();
   const items = await window.electronAPI.readEntries();
   const filtered = items.filter(it => it.text.toLowerCase().includes(q));
@@ -244,7 +250,7 @@ searchInput?.addEventListener('input', async e => {
 
 // init
 (async function init(){
-  setTab('dashboard');
+  setTab('dashboard');       // default tab
   await loadEntries();
   await loadConfigToUI();
   tickCountdown();

@@ -9,16 +9,18 @@
 <body>
   <div class="app">
     <header class="topbar">
-      <div class="brand">
+      <!-- Make brand clickable to go Home/Dashboard -->
+      <button class="brand" id="brand-home" title="Go to Dashboard" style="all:unset;cursor:pointer;display:flex;align-items:center;gap:12px">
         <div class="logo">WT</div>
         <div class="title">Work Tracker</div>
-      </div>
+      </button>
 
-      <nav class="tabs" role="tablist" aria-label="Main">
-        <button role="tab" aria-selected="true" id="tab-dashboard" class="tab active">Dashboard</button>
-        <button role="tab" id="tab-entries" class="tab">Entries</button>
-        <button role="tab" id="tab-settings" class="tab">Settings</button>
-        <button role="tab" id="tab-backup" class="tab">Backup</button>
+      <!-- Tab bar with data-tab attributes (for delegation) -->
+      <nav class="tabs" id="tabs" role="tablist" aria-label="Main">
+        <button role="tab" aria-selected="true" class="tab active" data-tab="dashboard">Dashboard</button>
+        <button role="tab" class="tab" data-tab="entries">Entries</button>
+        <button role="tab" class="tab" data-tab="settings">Settings</button>
+        <button role="tab" class="tab" data-tab="backup">Backup</button>
       </nav>
 
       <div class="top-actions">
