@@ -1,6 +1,5 @@
-// renderer.js — updated to call openBackupFolder and improved UI feedback
+// renderer.js — tabs, countdown, restore, dark/compact toggles
 const $ = s => document.querySelector(s);
-
 const tabs = {
   dashboard: $('#tab-dashboard'),
   entries: $('#tab-entries'),
@@ -29,6 +28,7 @@ const quickSaveAskBtn = $('#quick-save-ask');
 const openPromptBtn = $('#open-prompt-btn');
 const backupNowBtn = $('#backup-now');
 const openBackupFolderBtn = $('#open-backup-folder');
+const restoreBtn = $('#restore-btn');
 const recentEntriesEl = $('#recent-entries');
 const entriesEl = $('#entries');
 const searchInput = $('#search');
@@ -39,6 +39,8 @@ const resetSettingsBtn = $('#reset-settings');
 const askToggle = $('#ask-toggle');
 const notifToggle = $('#notif-toggle');
 const backupDaysInput = $('#backup-days');
+const darkToggle = $('#dark-toggle');
+const compactToggle = $('#compact-toggle');
 
 const infoInterval = $('#info-interval');
 const infoAsk = $('#info-ask-enabled');
@@ -46,7 +48,10 @@ const infoNotif = $('#info-notif');
 const backupLocationEl = $('#backup-location');
 const lastBackupEl = $('#last-backup');
 const backupKeepEl = $('#backup-keep');
-const currentIntervalSpan = document.getElementById('current-interval');
+const countdownEl = $('#countdown');
+
+const promptModal = $('#prompt-modal');
+const promptText = $('#prompt-text');
 
 const toastRoot = document.getElementById('toast-root');
 function toast(msg, type='success', t=3000) {
@@ -54,6 +59,8 @@ function toast(msg, type='success', t=3000) {
   setTimeout(()=>{ el.style.opacity='0'; setTimeout(()=>el.remove(),220) }, t);
   setTimeout(()=>{ el.style.opacity='1' }, 20);
 }
+
+function escapeHtml(s=''){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[m]);}
 
 async function loadEntries() {
   try {
@@ -81,7 +88,6 @@ function renderRecent(items) {
     recentEntriesEl.appendChild(d);
   });
 }
-function escapeHtml(s=''){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[m]);}
 
 async function loadConfigToUI() {
   try {
@@ -91,22 +97,24 @@ async function loadConfigToUI() {
     askToggle.checked = !!cfg.ask_enabled;
     notifToggle.checked = !!cfg.notifications_enabled;
     backupDaysInput.value = cfg.backup_keep_days || 10;
+    darkToggle.checked = !!cfg.dark_mode;
+    compactToggle.checked = !!cfg.compact_mode;
+
     infoInterval.textContent = `${cfg.ask_interval_minutes || 15} min`;
     infoAsk.textContent = cfg.ask_enabled ? 'On' : 'Off';
     infoNotif.textContent = cfg.notifications_enabled ? 'On' : 'Off';
-    currentIntervalSpan && (currentIntervalSpan.textContent = `${cfg.ask_interval_minutes || 15}`);
     backupKeepEl.textContent = cfg.backup_keep_days || 10;
+
     const p = await window.electronAPI.getBackupPath();
     backupLocationEl.textContent = p || '—';
+
+    applyThemeLocally({ dark: !!cfg.dark_mode, compact: !!cfg.compact_mode });
   } catch (e) { console.error(e); }
 }
 
-// modal logic
-const promptModal = $('#prompt-modal');
-const promptText = $('#prompt-text');
+// prompt modal
 function openPrompt() { promptModal.classList.add('open'); promptText.value=''; setTimeout(()=>promptText.focus(),80); }
 function closePrompt(){ promptModal.classList.remove('open'); }
-
 $('#save-ask').addEventListener('click', async ()=>{
   const t = promptText.value.trim(); closePrompt();
   if (!t) return toast('Empty — not saved','error');
@@ -115,11 +123,16 @@ $('#save-ask').addEventListener('click', async ()=>{
 $('#save-dontask').addEventListener('click', async ()=>{
   const t = promptText.value.trim(); closePrompt();
   if (!t) return toast('Empty — not saved','error');
-  try { await window.electronAPI.saveEntry(t); await window.electronAPI.setConfig({ ask_enabled:false }); toast('Saved & disabled prompts'); await loadConfigToUI(); await loadEntries(); } catch { toast('Failed','error') }
+  try {
+    await window.electronAPI.saveEntry(t);
+    await window.electronAPI.setConfig({ ask_enabled:false });
+    toast('Saved & disabled prompts'); await loadConfigToUI(); await loadEntries();
+  } catch { toast('Failed','error') }
 });
 $('#skip-this').addEventListener('click', async ()=>{ try{ await window.electronAPI.skipNext(); toast('Skipped next prompt'); }catch{toast('Failed','error')} closePrompt(); });
 $('#modal-close').addEventListener('click', closePrompt);
 
+// quick add
 quickSaveBtn.addEventListener('click', async ()=> {
   const t = quickText.value.trim(); if (!t) return toast('Type something','error');
   try { await window.electronAPI.saveEntry(t); quickText.value=''; toast('Saved'); await loadEntries(); } catch { toast('Save failed','error') }
@@ -130,6 +143,7 @@ quickSaveAskBtn.addEventListener('click', async ()=> {
 });
 openPromptBtn.addEventListener('click', openPrompt);
 
+// backup actions
 backupNowBtn.addEventListener('click', async ()=> {
   backupNowBtn.disabled = true; backupNowBtn.textContent = 'Backing up...';
   try {
@@ -139,43 +153,88 @@ backupNowBtn.addEventListener('click', async ()=> {
   } catch(e){ toast('Backup failed','error'); console.error(e) }
   backupNowBtn.disabled = false; backupNowBtn.textContent = 'Backup Now';
 });
-
 openBackupFolderBtn.addEventListener('click', async ()=> {
   try {
     const res = await window.electronAPI.openBackupFolder();
     if (res && res.ok) {
       toast('Backup folder opened');
     } else {
-      toast('Failed to open folder — copied path to clipboard', 'error');
-      // copy path so user can open manually
+      toast('Failed to open folder — path copied', 'error');
       const p = await window.electronAPI.getBackupPath();
       try { await navigator.clipboard.writeText(p || ''); } catch {}
     }
+  } catch (e) { console.error(e); toast('Open folder failed', 'error'); }
+});
+restoreBtn.addEventListener('click', async ()=> {
+  try {
+    const res = await window.electronAPI.restoreFromFile();
+    if (res && res.ok) {
+      toast(`Restored ${res.restored} entries`);
+      await loadEntries();
+    } else if (!res?.canceled) {
+      toast(res?.error || 'Restore failed', 'error');
+    }
   } catch (e) {
-    console.error(e); toast('Open folder failed', 'error');
+    console.error(e); toast('Restore failed', 'error');
   }
 });
 
+// settings save/reset
 saveSettingsBtn.addEventListener('click', async ()=>{
   const partial = {
     ask_interval_minutes: Math.max(1, Number(intervalInput.value) || 15),
     ask_enabled: !!askToggle.checked,
     notifications_enabled: !!notifToggle.checked,
     backup_keep_days: Math.max(1, Number(backupDaysInput.value) || 10),
+    dark_mode: !!darkToggle.checked,
+    compact_mode: !!compactToggle.checked,
   };
   try { await window.electronAPI.setConfig(partial); toast('Settings saved'); await loadConfigToUI(); } catch { toast('Save failed','error') }
 });
 resetSettingsBtn.addEventListener('click', async ()=> {
-  try { await window.electronAPI.setConfig({ ask_enabled:true, ask_interval_minutes:15, notifications_enabled:true, backup_keep_days:10 }); toast('Settings reset'); await loadConfigToUI(); } catch { toast('Reset failed','error') }
+  try {
+    await window.electronAPI.setConfig({
+      ask_enabled:true, ask_interval_minutes:15,
+      notifications_enabled:true, backup_keep_days:10,
+      dark_mode:false, compact_mode:false
+    });
+    toast('Settings reset'); await loadConfigToUI();
+  } catch { toast('Reset failed','error') }
 });
 
+// tabs
 document.getElementById('tab-dashboard').addEventListener('click', ()=>setTab('dashboard'));
 document.getElementById('tab-entries').addEventListener('click', ()=>setTab('entries'));
 document.getElementById('tab-settings').addEventListener('click', ()=>setTab('settings'));
 document.getElementById('tab-backup').addEventListener('click', ()=>setTab('backup'));
 
+// main → renderer events
 window.electronAPI.onOpenPrompt(()=>{ setTab('dashboard'); openPrompt(); });
+window.electronAPI.onApplyTheme(({dark, compact}) => applyThemeLocally({dark, compact}));
 
+// countdown UI
+function formatMs(ms){
+  const s = Math.max(0, Math.floor(ms/1000));
+  const m = Math.floor(s/60), r = s % 60;
+  return `${m.toString().padStart(2,'0')}:${r.toString().padStart(2,'0')}`;
+}
+async function tickCountdown(){
+  try {
+    const info = await window.electronAPI.getNextPromptInfo();
+    countdownEl.textContent = `Next: ${formatMs(info.remainingMs)} `;
+  } catch {
+    countdownEl.textContent = '';
+  }
+}
+setInterval(tickCountdown, 1000);
+
+// theme helpers
+function applyThemeLocally({dark, compact}){
+  document.body.setAttribute('data-theme', dark ? 'dark' : 'light');
+  document.body.setAttribute('data-dense', compact ? '1' : '0');
+}
+
+// search
 searchInput?.addEventListener('input', async e => {
   const q = e.target.value.trim().toLowerCase();
   const items = await window.electronAPI.readEntries();
@@ -183,9 +242,11 @@ searchInput?.addEventListener('input', async e => {
   renderEntries(filtered);
 });
 
+// init
 (async function init(){
   setTab('dashboard');
   await loadEntries();
   await loadConfigToUI();
+  tickCountdown();
   setInterval(()=>loadEntries(), 60_000);
 })();

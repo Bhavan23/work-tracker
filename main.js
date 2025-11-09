@@ -1,5 +1,5 @@
-// main.js - Work Tracker (with open-backup-folder support)
-const { app, BrowserWindow, Notification, ipcMain, shell } = require("electron");
+// main.js — Work Tracker (tabs UI + open folder + restore + countdown + themes)
+const { app, BrowserWindow, Notification, ipcMain, shell, dialog } = require("electron");
 const path = require("path");
 const fs = require("fs");
 
@@ -13,8 +13,8 @@ const LOG_FILE = path.join(USERDATA, "work-tracker.log");
 
 let mainWindow = null;
 let timer = null;
+let nextPromptAt = null; // Date
 let unsavedCounter = 0;
-let scheduledSettingConfirmation = null;
 
 function appendLog(level, ...args) {
   try {
@@ -50,6 +50,8 @@ function defaultConfig() {
     ask_interval_minutes: 15,
     notifications_enabled: true,
     backup_keep_days: 10,
+    dark_mode: false,
+    compact_mode: false,
   };
 }
 function ensureDirsAndFiles() {
@@ -66,9 +68,7 @@ function loadConfig() {
   const cfg = readJsonSafe(CONFIG_FILE, defaultConfig());
   return Object.assign(defaultConfig(), cfg);
 }
-function saveConfig(cfg) {
-  writeJsonAtomic(CONFIG_FILE, cfg);
-}
+function saveConfig(cfg) { writeJsonAtomic(CONFIG_FILE, cfg); }
 
 function createBackup() {
   ensureDirsAndFiles();
@@ -100,6 +100,7 @@ function pruneBackups(keepDays = 10) {
   }
 }
 
+// Entries
 function readEntries(limit = 200) {
   const arr = readJsonSafe(DATA_FILE, []);
   return Array.isArray(arr) ? arr.slice(0, limit) : [];
@@ -109,11 +110,10 @@ function saveEntry(text) {
   arr.unshift({ text, ts: new Date().toISOString() });
   writeJsonAtomic(DATA_FILE, arr);
   unsavedCounter++;
-  if (unsavedCounter >= 20) {
-    createBackup(); unsavedCounter = 0;
-  }
+  if (unsavedCounter >= 20) { createBackup(); unsavedCounter = 0; }
 }
 
+// Notifications
 function systemNotificationsAvailable() {
   if (process.env.WORK_TRACKER_DISABLE_NOTIFICATIONS === "1") return false;
   if (process.platform !== "linux") return true;
@@ -125,15 +125,10 @@ function systemNotificationsAvailable() {
   return true;
 }
 function showSystemNotification(title, body) {
-  try {
-    const notif = new Notification({ title, body });
-    notif.show();
-  } catch (e) {
-    console.warn("showSystemNotification failed", e);
-  }
+  try { new Notification({ title, body }).show(); } catch {}
 }
 
-// bring front (aggressive)
+// Prompt window focusing
 async function forceWindowToFront(retries = 3) {
   if (!mainWindow) return;
   try {
@@ -142,7 +137,7 @@ async function forceWindowToFront(retries = 3) {
     try { mainWindow.show() } catch {}
     try { mainWindow.setVisibleOnAllWorkspaces(true) } catch {}
     try { mainWindow.setAlwaysOnTop(true, "screen-saver") } catch {}
-    try { if (app && typeof app.focus === "function") app.focus() } catch {}
+    try { app.focus() } catch {}
     try { mainWindow.focus() } catch {}
     setTimeout(()=>{ try { mainWindow.webContents.send("open-prompt") } catch {} }, 120);
     setTimeout(()=>{ try { mainWindow.setAlwaysOnTop(false); mainWindow.setVisibleOnAllWorkspaces(false) } catch {} }, 900);
@@ -155,23 +150,27 @@ async function forceWindowToFront(retries = 3) {
   } catch (e) { console.error("forceWindowToFront error", e); }
 }
 
+function scheduleNextPrompt(minutes) {
+  nextPromptAt = new Date(Date.now() + minutes*60*1000);
+}
 function showPrompt() {
   const cfg = loadConfig();
-  if (!cfg.ask_enabled) return;
-  if (cfg.skip_next) { cfg.skip_next = false; saveConfig(cfg); return; }
+  if (!cfg.ask_enabled) { scheduleNextPrompt(cfg.ask_interval_minutes || 15); return; }
+  if (cfg.skip_next) { cfg.skip_next = false; saveConfig(cfg); scheduleNextPrompt(cfg.ask_interval_minutes || 15); return; }
+
+  // bring up prompt
   forceWindowToFront();
   const notifAllowed = cfg.notifications_enabled && systemNotificationsAvailable();
   if (notifAllowed) {
     try {
-      const notif = new Notification({ title: "What are you working on?", body: "Click to log your activity." });
-      notif.on("click", ()=>forceWindowToFront());
-      notif.show();
-    } catch (e) {
-      try { mainWindow?.webContents.send("open-prompt") } catch {}
-    }
+      const n = new Notification({ title: "What are you working on?", body: "Click to log your activity." });
+      n.on("click", ()=>forceWindowToFront());
+      n.show();
+    } catch { try { mainWindow?.webContents.send("open-prompt") } catch {} }
   } else {
     try { mainWindow?.webContents.send("open-prompt") } catch {}
   }
+  scheduleNextPrompt(cfg.ask_interval_minutes || 15);
 }
 
 function startTimerFromConfig() {
@@ -179,21 +178,29 @@ function startTimerFromConfig() {
   const cfg = loadConfig();
   const mins = Math.max(1, cfg.ask_interval_minutes || 15);
   const ms = mins * 60 * 1000;
+  scheduleNextPrompt(mins);
   timer = setInterval(showPrompt, ms);
+  // fire one gentle prompt soon after launch
   setTimeout(showPrompt, 300);
 }
 function stopTimer() { if (timer) clearInterval(timer); timer = null; }
 
 function createMainWindow() {
+  const cfg = loadConfig();
   mainWindow = new BrowserWindow({
-    width: 900, height: 700, focusable: true, alwaysOnTop: false,
+    width: 980, height: 740, focusable: true, alwaysOnTop: false,
     webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true },
   });
   mainWindow.loadFile(path.join(__dirname, "index.html"));
   mainWindow.on("closed", ()=> mainWindow = null);
+
+  // send theme flags to renderer
+  setTimeout(()=> {
+    try { mainWindow.webContents.send("apply-theme", { dark: !!cfg.dark_mode, compact: !!cfg.compact_mode }); } catch {}
+  }, 200);
 }
 
-// IPC handlers
+// IPC
 ipcMain.handle("read-entries", () => readEntries());
 ipcMain.handle("save-entry", (_, text) => { saveEntry(text); return readEntries(); });
 ipcMain.handle("create-backup", () => createBackup());
@@ -202,13 +209,28 @@ ipcMain.handle("open-backup-folder", async () => {
   try {
     ensureDirsAndFiles();
     if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
-    // Open the folder with default file manager
     const result = await shell.openPath(BACKUP_DIR);
-    // openPath returns empty string on success
-    if (result && result.length > 0) {
-      return { ok: false, error: result };
-    }
+    if (result && result.length > 0) return { ok: false, error: result };
     return { ok: true, path: BACKUP_DIR };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+});
+ipcMain.handle("restore-from-file", async () => {
+  try {
+    ensureDirsAndFiles();
+    const res = await dialog.showOpenDialog({
+      title: "Select backup file",
+      defaultPath: BACKUP_DIR,
+      properties: ["openFile"],
+      filters: [{ name: "JSON backups", extensions: ["json"] }],
+    });
+    if (res.canceled || !res.filePaths.length) return { ok: false, canceled: true };
+    const file = res.filePaths[0];
+    const data = readJsonSafe(file, null);
+    if (!Array.isArray(data)) return { ok: false, error: "Invalid backup format" };
+    writeJsonAtomic(DATA_FILE, data);
+    return { ok: true, restored: data.length };
   } catch (e) {
     return { ok: false, error: String(e) };
   }
@@ -216,16 +238,25 @@ ipcMain.handle("open-backup-folder", async () => {
 ipcMain.handle("get-config", () => loadConfig());
 ipcMain.handle("set-config", (_, partial) => {
   const old = loadConfig();
-  const cfg = Object.assign(old, partial);
+  const cfg = Object.assign(old, partial || {});
   saveConfig(cfg);
-  if (partial.ask_interval_minutes !== undefined) startTimerFromConfig();
+  if (partial && partial.ask_interval_minutes !== undefined) startTimerFromConfig();
+  // theme push
+  try { mainWindow?.webContents.send("apply-theme", { dark: !!cfg.dark_mode, compact: !!cfg.compact_mode }); } catch {}
+  // notif about saved
   if (cfg.notifications_enabled && systemNotificationsAvailable()) {
-    try { showSystemNotification("Work Tracker settings saved", `Next prompt in ${cfg.ask_interval_minutes} minute(s)`); } catch {}
+    try { showSystemNotification("Settings saved", `Next prompt in ${cfg.ask_interval_minutes} minute(s)`); } catch {}
   }
   return cfg;
 });
 ipcMain.handle("skip-next", ()=> { const cfg = loadConfig(); cfg.skip_next = true; saveConfig(cfg); return cfg; });
 ipcMain.handle("get-userdata-path", ()=> USERDATA);
+ipcMain.handle("get-next-prompt-info", () => {
+  const now = Date.now();
+  const at = nextPromptAt ? nextPromptAt.getTime() : now;
+  const remain = Math.max(0, at - now);
+  return { nextAt: at, remainingMs: remain };
+});
 
 app.whenReady().then(()=>{
   ensureDirsAndFiles();
