@@ -1,26 +1,37 @@
-// renderer.js - modern UI logic (works with your existing preload IPC)
-const $ = sel => document.querySelector(sel);
-const $$ = sel => Array.from(document.querySelectorAll(sel));
+// renderer.js — Tabbed UI + backup tab (works with preload IPC)
+const $ = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
 
-const pages = {
-  dashboard: $('#dashboard-view'),
-  entries: $('#entries-view'),
-  settings: $('#settings-view'),
+// Tabs
+const tabs = {
+  dashboard: $('#tab-dashboard'),
+  entries: $('#tab-entries'),
+  settings: $('#tab-settings'),
+  backup: $('#tab-backup'),
 };
-const navButtons = {
-  dashboard: $('#btn-dashboard'),
-  entries: $('#btn-entries'),
-  settings: $('#btn-settings'),
+const panels = {
+  dashboard: $('#panel-dashboard'),
+  entries: $('#panel-entries'),
+  settings: $('#panel-settings'),
+  backup: $('#panel-backup'),
 };
 
-const promptModal = $('#prompt-modal');
-const promptText = $('#prompt-text');
+function setTab(active) {
+  Object.keys(tabs).forEach(k => {
+    tabs[k].classList.toggle('active', k === active);
+    panels[k].classList.toggle('hidden', k !== active);
+    panels[k].setAttribute('aria-hidden', k !== active);
+    tabs[k].setAttribute('aria-selected', k === active ? 'true' : 'false');
+  });
+}
 
+// elements
 const quickText = $('#quick-text');
 const quickSaveBtn = $('#quick-save');
 const quickSaveAskBtn = $('#quick-save-ask');
 const openPromptBtn = $('#open-prompt-btn');
 const backupNowBtn = $('#backup-now');
+const openBackupFolderBtn = $('#open-backup-folder');
 const recentEntriesEl = $('#recent-entries');
 const entriesEl = $('#entries');
 const searchInput = $('#search');
@@ -37,62 +48,44 @@ const infoAsk = $('#info-ask-enabled');
 const infoNotif = $('#info-notif');
 const backupLocationEl = $('#backup-location');
 const lastBackupEl = $('#last-backup');
-const pageTitle = $('#page-title');
-const pageSub = $('#page-sub');
-const currentIntervalSpan = $('#current-interval');
+const backupKeepEl = $('#backup-keep');
+const currentIntervalSpan = document.getElementById('current-interval');
 
-// Toast utils
+// toasts
 const toastRoot = document.getElementById('toast-root');
-function showToast(msg, type = 'success', t = 3000) {
+function toast(msg, type='success', t=3000) {
   const el = document.createElement('div');
   el.className = `toast ${type}`;
   el.textContent = msg;
   toastRoot.appendChild(el);
-  setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 220); }, t);
-  // animate in
-  setTimeout(() => { el.style.opacity = '1'; }, 20);
-}
-
-// navigation
-function setActive(page) {
-  Object.values(navButtons).forEach(b => b.classList.remove('active'));
-  if (page === 'dashboard') navButtons.dashboard.classList.add('active');
-  if (page === 'entries') navButtons.entries.classList.add('active');
-  if (page === 'settings') navButtons.settings.classList.add('active');
-  Object.values(pages).forEach(p => p.classList.add('hidden'));
-  if (page === 'dashboard') pages.dashboard.classList.remove('hidden');
-  if (page === 'entries') pages.entries.classList.remove('hidden');
-  if (page === 'settings') pages.settings.classList.remove('hidden');
-  pageTitle.textContent = (page === 'dashboard' && 'Dashboard') || (page === 'entries' && 'All Entries') || 'Settings';
+  setTimeout(()=>{el.style.opacity='0'; setTimeout(()=>el.remove(),220)}, t);
+  setTimeout(()=>{el.style.opacity='1'},20);
 }
 
 // load entries
-async function loadEntries(limit = 200) {
+async function loadEntries() {
   try {
     const items = await window.electronAPI.readEntries();
     renderEntries(items);
-    renderRecent(items.slice(0, 8));
+    renderRecent(items.slice(0,8));
+    if (items && items.length) lastBackupEl.textContent = new Date(items[0].ts).toLocaleString();
   } catch (e) {
     console.error(e);
   }
 }
 function renderEntries(items) {
   entriesEl.innerHTML = '';
-  if (!items || items.length === 0) {
-    entriesEl.innerHTML = '<div class="entry">No entries yet</div>'; return;
-  }
+  if (!items || items.length === 0) return entriesEl.innerHTML = '<div class="entry">No entries yet</div>';
   items.forEach(it => {
-    const d = document.createElement('div');
-    d.className = 'entry';
-    d.innerHTML = `<div>${escapeHtml(it.text)}</div><div class="ts">${new Date(it.ts).toLocaleString()}</div>`;
-    entriesEl.appendChild(d);
+    const div = document.createElement('div');
+    div.className = 'entry';
+    div.innerHTML = `<div>${escapeHtml(it.text)}</div><div class="ts">${new Date(it.ts).toLocaleString()}</div>`;
+    entriesEl.appendChild(div);
   });
 }
 function renderRecent(items) {
   recentEntriesEl.innerHTML = '';
-  if (!items || items.length === 0) {
-    recentEntriesEl.innerHTML = '<div class="entry">No recent entries</div>'; return;
-  }
+  if (!items || items.length === 0) return recentEntriesEl.innerHTML = '<div class="entry">No recent entries</div>';
   items.forEach(it => {
     const d = document.createElement('div');
     d.className = 'entry';
@@ -100,10 +93,10 @@ function renderRecent(items) {
     recentEntriesEl.appendChild(d);
   });
 }
-function escapeHtml(s=''){ return String(s).replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
+function escapeHtml(s=''){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[m]);}
 
-// load config and populate UI
-async function loadConfig() {
+// load config
+async function loadConfigToUI() {
   try {
     const cfg = await window.electronAPI.getConfig();
     if (!cfg) return;
@@ -114,127 +107,93 @@ async function loadConfig() {
     infoInterval.textContent = `${cfg.ask_interval_minutes || 15} min`;
     infoAsk.textContent = cfg.ask_enabled ? 'On' : 'Off';
     infoNotif.textContent = cfg.notifications_enabled ? 'On' : 'Off';
-    currentIntervalSpan.textContent = `${cfg.ask_interval_minutes || 15}`;
-    // backup path
+    currentIntervalSpan && (currentIntervalSpan.textContent = `${cfg.ask_interval_minutes || 15}`);
+    backupKeepEl.textContent = cfg.backup_keep_days || 10;
     const p = await window.electronAPI.getBackupPath();
     backupLocationEl.textContent = p || '—';
-  } catch (e) {
-    console.error('loadConfig', e);
-  }
+    // last-backup already filled by loadEntries
+  } catch (e) { console.error(e); }
 }
 
-// open prompt modal
-function openPrompt() {
-  promptModal.classList.add('open');
-  promptText.value = '';
-  setTimeout(() => promptText.focus(), 80);
-}
-function closePrompt() { promptModal.classList.remove('open'); }
+// prompt modal logic
+const promptModal = $('#prompt-modal');
+const promptText = $('#prompt-text');
+function openPrompt() { promptModal.classList.add('open'); promptText.value=''; setTimeout(()=>promptText.focus(),80); }
+function closePrompt(){ promptModal.classList.remove('open'); }
 
-// wire modal buttons
-$('#save-ask').addEventListener('click', async () => {
-  const txt = promptText.value.trim(); closePrompt();
-  if (!txt) { showToast('Empty — not saved', 'error'); return; }
-  try {
-    await window.electronAPI.saveEntry(txt);
-    await loadEntries();
-    showToast('Saved');
-  } catch (e) { showToast('Failed to save', 'error'); }
+$('#save-ask').addEventListener('click', async ()=>{
+  const t = promptText.value.trim(); closePrompt();
+  if (!t) return toast('Empty — not saved','error');
+  try { await window.electronAPI.saveEntry(t); toast('Saved'); await loadEntries(); } catch { toast('Save failed','error') }
 });
-$('#save-dontask').addEventListener('click', async () => {
-  const txt = promptText.value.trim(); closePrompt();
-  if (!txt) { showToast('Empty — not saved', 'error'); return; }
-  try {
-    await window.electronAPI.saveEntry(txt);
-    await window.electronAPI.setConfig({ ask_enabled: false });
-    await loadEntries();
-    await loadConfig();
-    showToast('Saved and disabled prompts');
-  } catch (e) { showToast('Failed', 'error'); }
+$('#save-dontask').addEventListener('click', async ()=>{
+  const t = promptText.value.trim(); closePrompt();
+  if (!t) return toast('Empty — not saved','error');
+  try { await window.electronAPI.saveEntry(t); await window.electronAPI.setConfig({ ask_enabled: false }); toast('Saved & disabled prompts'); await loadConfigToUI(); await loadEntries(); } catch { toast('Failed','error') }
 });
-$('#skip-this').addEventListener('click', async () => {
-  try { await window.electronAPI.skipNext(); showToast('Skipped next prompt'); } catch(e){showToast('Failed', 'error');}
-  closePrompt();
-});
+$('#skip-this').addEventListener('click', async ()=>{ try{ await window.electronAPI.skipNext(); toast('Skipped next prompt'); }catch{toast('Failed','error')} closePrompt(); });
 $('#modal-close').addEventListener('click', closePrompt);
 
 // quick add
-quickSaveBtn.addEventListener('click', async () => {
-  const t = quickText.value.trim(); if (!t) return showToast('Type something', 'error');
-  try { await window.electronAPI.saveEntry(t); quickText.value = ''; await loadEntries(); showToast('Saved'); } catch(e){showToast('Save failed','error')}
+quickSaveBtn.addEventListener('click', async ()=>{
+  const t = quickText.value.trim(); if (!t) return toast('Type something','error');
+  try { await window.electronAPI.saveEntry(t); quickText.value=''; toast('Saved'); await loadEntries(); } catch { toast('Save failed','error') }
 });
-quickSaveAskBtn.addEventListener('click', async () => {
-  const t = quickText.value.trim(); if (!t) return showToast('Type something', 'error');
-  try { await window.electronAPI.saveEntry(t); quickText.value = ''; await loadEntries(); showToast('Saved — will ask later'); } catch(e){showToast('Save failed','error')}
+quickSaveAskBtn.addEventListener('click', async ()=>{
+  const t = quickText.value.trim(); if (!t) return toast('Type something','error');
+  try { await window.electronAPI.saveEntry(t); quickText.value=''; toast('Saved — will ask later'); await loadEntries(); } catch { toast('Save failed','error') }
 });
 
-// open prompt button
-openPromptBtn.addEventListener('click', () => openPrompt());
+// open prompt
+openPromptBtn.addEventListener('click', openPrompt);
 
-// backup
-backupNowBtn.addEventListener('click', async () => {
+// backup actions
+backupNowBtn.addEventListener('click', async ()=>{
   backupNowBtn.disabled = true; backupNowBtn.textContent = 'Backing up...';
-  try {
-    await window.electronAPI.createBackup();
-    showToast('Backup updated');
-    await loadConfig();
-  } catch (e) { showToast('Backup failed', 'error') }
-  backupNowBtn.disabled = false; backupNowBtn.textContent = 'Backup';
+  try { await window.electronAPI.createBackup(); toast('Backup updated'); await loadConfigToUI(); await loadEntries(); } catch { toast('Backup failed','error') }
+  backupNowBtn.disabled = false; backupNowBtn.textContent = 'Backup Now';
+});
+$('#open-backup-folder')?.addEventListener('click', async ()=>{
+  const p = await window.electronAPI.getBackupPath();
+  // open via shell (may be not implemented in preload, so we just copy path and toast)
+  try { await navigator.clipboard.writeText(p || ''); toast('Backup path copied to clipboard'); } catch { toast('Open folder: not available in this build','error') }
 });
 
 // settings save
-saveSettingsBtn.addEventListener('click', async () => {
+saveSettingsBtn.addEventListener('click', async ()=>{
   const partial = {
     ask_interval_minutes: Math.max(1, Number(intervalInput.value) || 15),
     ask_enabled: !!askToggle.checked,
     notifications_enabled: !!notifToggle.checked,
     backup_keep_days: Math.max(1, Number(backupDaysInput.value) || 10),
   };
-  try {
-    const cfg = await window.electronAPI.setConfig(partial);
-    showToast('Settings saved');
-    await loadConfig();
-  } catch (e) {
-    console.error(e); showToast('Save failed', 'error');
-  }
+  try { await window.electronAPI.setConfig(partial); toast('Settings saved'); await loadConfigToUI(); } catch { toast('Save failed','error') }
 });
-
-// reset settings
-resetSettingsBtn.addEventListener('click', async () => {
-  try {
-    await window.electronAPI.setConfig({ ask_enabled: true, ask_interval_minutes: 15, notifications_enabled: true, backup_keep_days: 10 });
-    showToast('Settings reset');
-    await loadConfig();
-  } catch (e) { showToast('Reset failed', 'error') }
+resetSettingsBtn.addEventListener('click', async ()=>{
+  try { await window.electronAPI.setConfig({ ask_enabled:true, ask_interval_minutes:15, notifications_enabled:true, backup_keep_days:10 }); toast('Settings reset'); await loadConfigToUI(); } catch { toast('Reset failed','error') }
 });
 
 // search
-searchInput?.addEventListener('input', async e => {
+searchInput?.addEventListener('input', async e=>{
   const q = e.target.value.trim().toLowerCase();
   const items = await window.electronAPI.readEntries();
-  const filtered = items.filter(it => it.text.toLowerCase().includes(q));
+  const filtered = items.filter(it=>it.text.toLowerCase().includes(q));
   renderEntries(filtered);
 });
 
-// respond to main open-prompt
-window.electronAPI.onOpenPrompt(() => {
-  openPrompt();
-});
+// tabs wiring
+tabs.dashboard.addEventListener('click', ()=>setTab('dashboard'));
+tabs.entries.addEventListener('click', ()=>setTab('entries'));
+tabs.settings.addEventListener('click', ()=>setTab('settings'));
+tabs.backup.addEventListener('click', ()=>setTab('backup'));
 
-// nav buttons
-navButtons.dashboard.addEventListener('click', () => setActive('dashboard'));
-navButtons.entries.addEventListener('click', () => setActive('entries'));
-navButtons.settings.addEventListener('click', () => setActive('settings'));
+// listen for main open-prompt
+window.electronAPI.onOpenPrompt(()=>{ setTab('dashboard'); openPrompt(); });
 
 // init
 (async function init(){
-  setActive('dashboard');
+  setTab('dashboard');
   await loadEntries();
-  await loadConfig();
-  // update backup last info from entries timestamp (best effort)
-  const entries = await window.electronAPI.readEntries();
-  if (entries && entries.length) lastBackupEl.textContent = new Date(entries[0].ts).toLocaleString();
+  await loadConfigToUI();
+  setInterval(()=>{ loadEntries(); }, 60_000);
 })();
-
-// helper to reload entries if main process updates data
-setInterval(()=>loadEntries(), 60_000);
