@@ -8,15 +8,12 @@
 </head>
 <body>
   <div class="app">
-    <!-- Top App Bar -->
     <header class="topbar">
-      <!-- Brand -->
-      <button class="brand" id="brand-home" title="Go to Dashboard" type="button" style="all:unset;cursor:pointer;display:flex;align-items:center;gap:12px">
+      <button class="brand" id="brand-home" type="button" title="Go to Dashboard" style="all:unset;cursor:pointer;display:flex;align-items:center;gap:12px">
         <div class="logo">WT</div>
         <div class="title">Work Tracker</div>
       </button>
 
-      <!-- Tabs -->
       <nav class="tabs" id="tabs" role="tablist" aria-label="Main">
         <button id="tab-dashboard" role="tab" aria-selected="true" aria-controls="panel-dashboard" class="tab active" data-tab="dashboard" tabindex="0" type="button">Dashboard</button>
         <button id="tab-entries"   role="tab" aria-selected="false" aria-controls="panel-entries"   class="tab" data-tab="entries"   tabindex="-1" type="button">Entries</button>
@@ -30,19 +27,16 @@
       </div>
     </header>
 
-    <!-- Hero -->
     <header class="hero">
       <div class="hero-bg"></div>
       <h1 class="app-title">Work Tracker</h1>
       <p class="subtitle">
-        A Vibe-coded app to track your daily work — with built-in backups, better backup management,
-        and improved settings configuration.
+        A vibe-coded app to track your daily work — with backups, better backup management,
+        and flexible configuration. All times shown in Asia/Kolkata (IST).
       </p>
     </header>
 
-    <!-- Main Content -->
     <main class="container">
-      <!-- DASHBOARD -->
       <section id="panel-dashboard" class="panel" role="tabpanel" aria-labelledby="tab-dashboard" aria-hidden="false">
         <section class="stats">
           <div class="stat-card"><div class="stat-title">Today</div><div class="stat-value" id="stat-today">0</div></div>
@@ -77,7 +71,6 @@
         </div>
       </section>
 
-      <!-- ENTRIES -->
       <section id="panel-entries" class="panel hidden" role="tabpanel" aria-labelledby="tab-entries" aria-hidden="true">
         <div class="subhead">
           <h3>Entries</h3>
@@ -86,7 +79,6 @@
         <div id="entries" class="entries entries--full"></div>
       </section>
 
-      <!-- SETTINGS -->
       <section id="panel-settings" class="panel hidden" role="tabpanel" aria-labelledby="tab-settings" aria-hidden="true">
         <h3>Settings</h3>
         <div class="settings-grid">
@@ -127,7 +119,6 @@
         </div>
       </section>
 
-      <!-- BACKUP -->
       <section id="panel-backup" class="panel hidden" role="tabpanel" aria-labelledby="tab-backup" aria-hidden="true">
         <h3>Backup & Restore</h3>
         <div class="card">

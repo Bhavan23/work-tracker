@@ -1,15 +1,48 @@
-// renderer.js — modal fix: body scroll lock, focus trap, and robust centering
+// renderer.js – IST display everywhere; UTC math for logic
 const $ = s => document.querySelector(s);
 
-/* Panels */
+/* ---------- IST formatting helpers ---------- */
+function formatIST(dateLike) {
+  return new Date(dateLike).toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    hour12: false
+  });
+}
+function formatISTShort(dateLike) {
+  return new Date(dateLike).toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    hour12: false,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit'
+  });
+}
+function startOfDayIST(d=new Date()){
+  // We only need this for "today" grouping in UI; use system local + compare string by IST date.
+  const s = new Date(d).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', year:'numeric', month:'2-digit', day:'2-digit' });
+  // parse again just to get a comparable Y-M-D string:
+  const [dd, mm, yyyy] = s.split(',')[0].split('/'); // "dd/mm/yyyy, ..."
+  return `${yyyy}-${mm}-${dd}`; // IST day key
+}
+function startOfWeekKeyIST(d=new Date()){
+  // find Monday in IST: walk back to Monday using IST weekday
+  const dt = new Date(d);
+  // get IST weekday (0=Sunday in JS, but we want Monday-based week UI; do a loop)
+  let w = new Date(dt).toLocaleString('en-IN', { timeZone:'Asia/Kolkata', weekday:'short' });
+  const map = { Sun:0, Mon:1, Tue:2, Wed:3, Thu:4, Fri:5, Sat:6 };
+  let day = map[w] ?? 0;
+  const back = (day + 6) % 7; // days to go back to Monday
+  dt.setDate(dt.getDate() - back);
+  const key = startOfDayIST(dt);
+  return key;
+}
+
+/* ---------- Panels & Tabs ---------- */
 const panels = {
   dashboard: $('#panel-dashboard'),
   entries:   $('#panel-entries'),
   settings:  $('#panel-settings'),
   backup:    $('#panel-backup'),
 };
-
-/* Tabs */
 const tabsNode = document.getElementById('tabs');
 const tabButtons = () => [...tabsNode.querySelectorAll('[role="tab"]')];
 
@@ -26,15 +59,13 @@ function setTab(active) {
     panels[k].setAttribute('aria-hidden', show ? 'false' : 'true');
   });
 }
-
-tabsNode.addEventListener('click', (e)=>{
+tabsNode.addEventListener('click', e=>{
   const btn = e.target.closest('.tab[data-tab]');
   if (!btn) return;
   setTab(btn.dataset.tab);
   btn.focus();
 });
-
-tabsNode.addEventListener('keydown', (e)=>{
+tabsNode.addEventListener('keydown', e=>{
   const keys = ['ArrowLeft','ArrowRight','Home','End'];
   if (!keys.includes(e.key)) return;
   e.preventDefault();
@@ -49,10 +80,9 @@ tabsNode.addEventListener('keydown', (e)=>{
   setTab(target.dataset.tab);
   target.focus();
 });
-
 document.getElementById('brand-home').addEventListener('click', ()=> setTab('dashboard'));
 
-/* Elements */
+/* ---------- Elements ---------- */
 const quickText = $('#quick-text');
 const quickSaveBtn = $('#quick-save');
 const quickSaveAskBtn = $('#quick-save-ask');
@@ -81,13 +111,13 @@ const lastBackupEl = $('#last-backup');
 const backupKeepEl = $('#backup-keep');
 const countdownEl = $('#countdown');
 
-/* Stats */
+/* ---------- Stats labels ---------- */
 const statToday = $('#stat-today');
 const statWeek  = $('#stat-week');
 const statTotal = $('#stat-total');
 const statStreak= $('#stat-streak');
 
-/* Toast */
+/* ---------- Toast ---------- */
 const toastRoot = document.getElementById('toast-root');
 function toast(msg, type='success', t=2600) {
   const el = document.createElement('div'); el.className = `toast ${type}`; el.textContent = msg; toastRoot.appendChild(el);
@@ -95,12 +125,8 @@ function toast(msg, type='success', t=2600) {
   setTimeout(()=>{ el.style.opacity='1' }, 18);
 }
 
-/* Helpers */
+/* ---------- Render helpers ---------- */
 function escapeHtml(s=''){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[m]);}
-function startOfDay(d){const x=new Date(d);x.setHours(0,0,0,0);return x;}
-function startOfWeek(d){const x=startOfDay(d);const day=x.getDay();const diff=(day+6)%7; x.setDate(x.getDate()-diff); return x;} // Mon
-
-/* Entries rendering */
 function emptyState(msg){ return `<div class="entry"><div class="text"><span class="dot"></span>${escapeHtml(msg)}</div></div>`; }
 
 function renderEntries(items) {
@@ -114,13 +140,12 @@ function renderEntries(items) {
     const row = document.createElement('div'); row.className='entry';
     row.innerHTML = `
       <div class="text"><span class="dot"></span>${escapeHtml(it.text)}</div>
-      <div class="ts">${new Date(it.ts).toLocaleString()}</div>
+      <div class="ts">${formatISTShort(it.ts)}</div>
     `;
     entriesEl.appendChild(row);
   });
   entriesEl.scrollTop = y;
 }
-
 function renderRecent(items) {
   recentEntriesEl.innerHTML = '';
   if (!items || items.length === 0) {
@@ -131,34 +156,45 @@ function renderRecent(items) {
     const row = document.createElement('div'); row.className='entry';
     row.innerHTML = `
       <div class="text"><span class="dot"></span><strong>${escapeHtml(it.text)}</strong></div>
-      <div class="ts">${new Date(it.ts).toLocaleString()}</div>
+      <div class="ts">${formatISTShort(it.ts)}</div>
     `;
     recentEntriesEl.appendChild(row);
   });
 }
 
-/* Stats calculation */
+/* ---------- Stats (by IST day/week) ---------- */
 function computeStats(items){
-  const now = new Date();
-  const sod = startOfDay(now).getTime();
-  const sow = startOfWeek(now).getTime();
-
-  let today = 0, week = 0, total = items.length;
-
   const byDay = new Map();
-  for (const it of items) {
-    const t = new Date(it.ts);
-    if (startOfDay(t).getTime() === sod) today++;
-    if (startOfDay(t).getTime() >= sow) week++;
-    const key = t.toISOString().slice(0,10);
-    byDay.set(key, (byDay.get(key) || 0) + 1);
+  let total = items.length;
+
+  items.forEach(it=>{
+    const dayKey = startOfDayIST(new Date(it.ts));
+    byDay.set(dayKey, (byDay.get(dayKey) || 0) + 1);
+  });
+
+  // today
+  const todayKey = startOfDayIST(new Date());
+  const today = byDay.get(todayKey) || 0;
+
+  // week
+  const sowKey = startOfWeekKeyIST(new Date());
+  let week = 0;
+  // sum days from monday to todayKey (rough approach: iterate last 7 days)
+  for (let i=0;i<7;i++){
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const k = startOfDayIST(d);
+    week += (byDay.get(k) || 0);
+    if (k === sowKey) break;
   }
 
+  // streak
   let streak = 0;
   for (let i=0; i<365; i++){
-    const d = new Date(); d.setDate(d.getDate() - i);
-    const key = d.toISOString().slice(0,10);
-    if (byDay.has(key)) streak++;
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const k = startOfDayIST(d);
+    if (byDay.has(k)) streak++;
     else break;
   }
 
@@ -168,7 +204,7 @@ function computeStats(items){
   statStreak.textContent= streak;
 }
 
-/* Load entries + stats */
+/* ---------- Load entries & stats ---------- */
 async function loadEntries() {
   try {
     entriesEl.innerHTML = '<div class="entry"><div class="skeleton" style="width:70%"></div></div>';
@@ -176,16 +212,15 @@ async function loadEntries() {
     renderEntries(items);
     renderRecent(items.slice(0,8));
     (window.requestIdleCallback || setTimeout)(()=> computeStats(items), 50);
-    if (items && items.length) lastBackupEl.textContent = new Date(items[0].ts).toLocaleString();
+    if (items && items.length) lastBackupEl.textContent = formatISTShort(items[0].ts);
   } catch (e) { console.error(e); }
 }
 
-/* Config → UI */
+/* ---------- Config → UI ---------- */
 function applyThemeLocally({dark, compact}){
   document.body.setAttribute('data-theme', dark ? 'dark' : 'light');
   document.body.setAttribute('data-dense', compact ? '1' : '0');
 }
-
 async function loadConfigToUI() {
   try {
     const cfg = await window.electronAPI.getConfig();
@@ -197,9 +232,9 @@ async function loadConfigToUI() {
     darkToggle.checked = !!cfg.dark_mode;
     compactToggle.checked = !!cfg.compact_mode;
 
-    document.getElementById('info-interval').textContent = `${cfg.ask_interval_minutes ?? 15} min`;
-    document.getElementById('info-ask-enabled').textContent = cfg.ask_enabled ? 'On' : 'Off';
-    document.getElementById('info-notif').textContent = cfg.notifications_enabled ? 'On' : 'Off';
+    infoInterval.textContent = `${cfg.ask_interval_minutes ?? 15} min`;
+    infoAsk.textContent = cfg.ask_enabled ? 'On' : 'Off';
+    infoNotif.textContent = cfg.notifications_enabled ? 'On' : 'Off';
     backupKeepEl.textContent = cfg.backup_keep_days ?? 10;
 
     const p = await window.electronAPI.getBackupPath();
@@ -214,7 +249,7 @@ async function loadConfigToUI() {
   } catch (e) { console.error(e); }
 }
 
-/* Prompt modal with scroll lock + focus trap */
+/* ---------- Modal ---------- */
 const promptModal = $('#prompt-modal');
 const promptText = $('#prompt-text');
 const modalClose = $('#modal-close');
@@ -231,27 +266,25 @@ function trapFocus(e){
     else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
   }
 }
-
 function openPrompt() {
   lastFocused = document.activeElement;
-  document.body.classList.add('no-scroll');          // lock background scroll
+  document.body.classList.add('modal-open');
   promptModal.classList.add('open');
   promptModal.setAttribute('aria-hidden','false');
-  // ensure top of modal is visible even in very small windows
-  setTimeout(()=>{ promptText.scrollIntoView({block:'center'}); promptText.focus(); }, 60);
+  setTimeout(()=>promptText.focus(), 60);
   document.addEventListener('keydown', trapFocus);
 }
 function closePrompt(){
   promptModal.classList.remove('open');
   promptModal.setAttribute('aria-hidden','true');
-  document.body.classList.remove('no-scroll');       // unlock scroll
+  document.body.classList.remove('modal-open');
   document.removeEventListener('keydown', trapFocus);
   if (lastFocused?.focus) lastFocused.focus();
 }
 modalClose.addEventListener('click', closePrompt);
 promptModal.addEventListener('keydown', e=>{ if(e.key==='Escape') closePrompt(); });
 
-/* Prompt actions */
+/* ---------- Actions ---------- */
 $('#save-ask').addEventListener('click', async ()=>{
   const t = promptText.value.trim(); closePrompt();
   if (!t) return toast('Empty — not saved','error');
@@ -268,18 +301,15 @@ $('#save-dontask').addEventListener('click', async ()=>{
 });
 $('#skip-this').addEventListener('click', async ()=>{ try{ await window.electronAPI.skipNext(); toast('Skipped next prompt'); }catch{toast('Failed','error')} closePrompt(); });
 
-/* Quick add */
-quickSaveBtn.addEventListener('click', async ()=> {
+const quickSave = async (alsoAskLater=false)=>{
   const t = quickText.value.trim(); if (!t) return toast('Type something','error');
-  try { await window.electronAPI.saveEntry(t); quickText.value=''; toast('Saved'); await loadEntries(); } catch { toast('Save failed','error') }
-});
-quickSaveAskBtn.addEventListener('click', async ()=> {
-  const t = quickText.value.trim(); if (!t) return toast('Type something','error');
-  try { await window.electronAPI.saveEntry(t); quickText.value=''; toast('Saved — will ask later'); await loadEntries(); } catch { toast('Save failed','error') }
-});
+  try { await window.electronAPI.saveEntry(t); quickText.value=''; toast(alsoAskLater?'Saved — will ask later':'Saved'); await loadEntries(); } catch { toast('Save failed','error') }
+};
+quickSaveBtn.addEventListener('click', ()=>quickSave(false));
+quickSaveAskBtn.addEventListener('click', ()=>quickSave(true));
 openPromptBtn.addEventListener('click', openPrompt);
 
-/* Backup actions */
+/* ---------- Backups ---------- */
 backupNowBtn.addEventListener('click', async ()=> {
   backupNowBtn.disabled = true; backupNowBtn.textContent = 'Backing up...';
   try {
@@ -287,9 +317,9 @@ backupNowBtn.addEventListener('click', async ()=> {
     if (res && res.ok) {
       const p = await window.electronAPI.getBackupPath();
       toast(`Backup updated (${(p||'').split('/').pop() || 'today.json'})`);
-      await loadConfigToUI(); await loadEntries();
+      await loadEntries();
     } else {
-      toast('Backup failed','error'); console.error(res);
+      toast('Backup failed','error');
     }
   } catch(e){ toast('Backup failed','error'); console.error(e) }
   backupNowBtn.disabled = false; backupNowBtn.textContent = 'Backup Now';
@@ -297,13 +327,8 @@ backupNowBtn.addEventListener('click', async ()=> {
 openBackupFolderBtn.addEventListener('click', async ()=> {
   try {
     const res = await window.electronAPI.openBackupFolder();
-    if (res && res.ok) {
-      toast('Backup folder opened');
-    } else {
-      toast('Failed to open folder — path copied', 'error');
-      const p = await window.electronAPI.getBackupPath();
-      try { await navigator.clipboard.writeText(p || ''); } catch {}
-    }
+    if (res && res.ok) toast('Backup folder opened');
+    else toast('Failed to open folder', 'error');
   } catch (e) { console.error(e); toast('Open folder failed', 'error'); }
 });
 restoreBtn.addEventListener('click', async ()=> {
@@ -318,7 +343,7 @@ restoreBtn.addEventListener('click', async ()=> {
   } catch (e) { console.error(e); toast('Restore failed', 'error'); }
 });
 
-/* Settings save/reset */
+/* ---------- Settings ---------- */
 saveSettingsBtn.addEventListener('click', async ()=>{
   const partial = {
     ask_interval_minutes: Math.max(1, Number(intervalInput.value) || 15),
@@ -340,14 +365,10 @@ resetSettingsBtn.addEventListener('click', async ()=> {
     toast('Settings reset'); await loadConfigToUI();
   } catch { toast('Reset failed','error') }
 });
-
-/* Main → renderer events */
 window.electronAPI.onOpenPrompt(()=>{ setTab('dashboard'); openPrompt(); });
-window.electronAPI.onApplyTheme(({dark, compact}) => {
-  applyThemeLocally({dark, compact});
-});
+window.electronAPI.onApplyTheme(({dark, compact}) => applyThemeLocally({dark, compact}));
 
-/* Countdown */
+/* ---------- Countdown (UTC math, display only) ---------- */
 function formatMs(ms){
   const s = Math.max(0, Math.floor(ms/1000));
   const m = Math.floor(s/60), r = s % 60;
@@ -363,7 +384,7 @@ async function tickCountdown(){
 }
 setInterval(tickCountdown, 1000);
 
-/* Search */
+/* ---------- Search ---------- */
 searchInput?.addEventListener('input', async e => {
   const q = e.target.value.trim().toLowerCase();
   const items = await window.electronAPI.readEntries();
@@ -371,11 +392,12 @@ searchInput?.addEventListener('input', async e => {
   renderEntries(filtered);
 });
 
-/* Init */
+/* ---------- Init ---------- */
 (async function init(){
   setTab('dashboard');
   await loadEntries();
   await loadConfigToUI();
   tickCountdown();
+  // periodic refresh
   setInterval(()=>loadEntries(), 60_000);
 })();

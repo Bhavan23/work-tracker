@@ -1,15 +1,13 @@
 {
   "name": "work-tracker",
   "version": "1.0.0",
-  "description": "Ask every 15 minutes what I'm currently working on (Electron)",
+  "description": "Vibe-coded daily work tracker with backups and IST timestamps",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "pack": "electron-packager . WorkTracker --platform=win32,linux,darwin --arch=x64 --out=dist --overwrite"
+    "dev": "electron ."
   },
-  "author": "you",
-  "license": "MIT",
   "devDependencies": {
-    "electron": "^26.6.10"
+    "electron": "^26.0.0"
   }
 }
